@@ -6,150 +6,247 @@ import android.util.Log;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
-import java.net.HttpURLConnection;
-import java.net.URL;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import okhttp3.HttpUrl;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 /**
- * Fetches Waze crowdsourced alerts via the Waze live-map georss API.
+ * Fetches Waze crowdsourced alerts, mirroring the wzsabre 1.8 approach exactly:
  *
- * Strategy (mirrors wzsabre 1.8 WWWClient / WazeLiveMapQuery):
- *   1. GET https://www.waze.com/login/get to establish a session and receive cookies.
- *   2. GET the georss API URL with those cookies and Referer: https://www.waze.com/live-map.
+ *  1. WebViewInterceptor loads https://www.waze.com/ in a hidden WebView and
+ *     waits for Waze's own JS to fire a /live-map/api/georss request.  The
+ *     session cookies captured at that point are the ones Waze requires.
  *
- * Uses java.net.CookieManager so cookies from step 1 are automatically sent in step 2.
+ *  2. Those cookies are loaded into a java.net.CookieManager and passed to
+ *     OkHttp via JavaNetCookieJar for all subsequent data requests.
+ *
+ *  3. The georss endpoint is queried with params:
+ *       top, bottom, left, right  (bounding-box corners)
+ *       types = alerts
+ *       env   = region code ("na" for North America, "il" for Israel, "row" otherwise)
+ *
+ *  4. Adaptive tiling: if a query returns ≥ 150 alerts the bounding box is
+ *     split in half and both halves are queried (sequentially), deduplicating
+ *     by alert id — matching wzsabre 1.8's recursive queryServer logic.
  */
 public class WazeSource {
     private static final String TAG = "WazeSource";
 
-    // Matches wzsabre 1.8 default user-agent (desktop Mac Chrome)
+    // wzsabre 1.8 default user-agent (Windows Chrome 146)
     private static final String USER_AGENT =
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_0_9; en-US) " +
-            "AppleWebKit/537.13 (KHTML, like Gecko) Chrome/48.0.2867.225 Safari/534";
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+            "AppleWebKit/537.36 (KHTML, like Gecko) " +
+            "Chrome/146.0.0.0 Safari/537.36";
 
-    private static final String INIT_URL   = "https://www.waze.com/login/get";
-    private static final String REFERER    = "https://www.waze.com/live-map";
+    private static final String INIT_URL      = "https://www.waze.com/";
+    private static final String INTERCEPT_PATH = "/live-map/api/georss";
+    private static final String GEORSS_URL    = "https://www.waze.com/live-map/api/georss";
+    private static final String REFERER       = "https://www.waze.com/live-map";
 
-    private final CookieManager cookieManager;
+    private static final int TILE_ALERT_THRESHOLD = 150; // matches wzsabre 1.8
+
+    private final WebViewInterceptor webViewInterceptor;
+    private final OkHttpClient       httpClient;
+    /** Cookies captured from the last successful WebView intercept. */
+    private volatile String          sessionCookies = "";
 
     public WazeSource(Context context) {
-        cookieManager = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
-        java.net.CookieHandler.setDefault(cookieManager);
+        webViewInterceptor = new WebViewInterceptor(context);
+        httpClient = new OkHttpClient.Builder()
+                .callTimeout(15L, TimeUnit.SECONDS)
+                .build();
     }
 
-    public List<SabreAlert> fetchAlerts(double centerLat, double centerLon, double radiusMeters) {
-        List<SabreAlert> results = new ArrayList<>();
+    public List<SabreAlert> fetchAlerts(double centerLat, double centerLon,
+                                         double radiusMeters) {
         try {
-            // Step 1: init session / get cookies
-            initSession();
+            // ── Step 1: obtain session cookies via WebView ────────────────
+            String cookies = webViewInterceptor.extractCookies(
+                    INIT_URL, INTERCEPT_PATH, USER_AGENT, 30_000L);
 
-            // Step 2: build bounding-box georss URL
-            double delta    = radiusMeters / 111_320.0;
-            double lonDelta = delta / Math.cos(Math.toRadians(centerLat));
-            String georssUrl = String.format(Locale.US,
-                    "https://www.waze.com/live-map/api/georss" +
-                    "?top_right_lat=%.6f&top_right_lon=%.6f" +
-                    "&bottom_left_lat=%.6f&bottom_left_lon=%.6f" +
-                    "&env=row&types=alerts,traffic",
-                    centerLat + delta, centerLon + lonDelta,
-                    centerLat - delta, centerLon - lonDelta);
-
-            Log.d(TAG, "Fetching georss: " + georssUrl);
-
-            // Step 3: fetch georss with session cookies
-            String json = httpGet(georssUrl, REFERER);
-            if (json != null && json.startsWith("{")) {
-                results = parseAlerts(json);
-                Log.d(TAG, "Waze: " + results.size() + " alerts parsed");
-            } else {
-                int len = json == null ? 0 : Math.min(200, json.length());
-                Log.w(TAG, "Waze: unexpected response: " +
-                        (json == null ? "null" : json.substring(0, len)));
+            if (cookies == null || cookies.isEmpty()) {
+                Log.w(TAG, "No cookies obtained from WebView");
+                return new ArrayList<>();
             }
+            Log.d(TAG, "Cookies captured: " + cookies.length() + " chars");
+            sessionCookies = cookies;
+
+            // ── Step 3: build bounding box and query ─────────────────────
+            double latDelta = radiusMeters / 111_320.0;
+            double lonDelta = latDelta / Math.cos(Math.toRadians(centerLat));
+
+            double top    = centerLat + latDelta;
+            double bottom = centerLat - latDelta;
+            double left   = centerLon - lonDelta;
+            double right  = centerLon + lonDelta;
+
+            String env = getRegion(centerLat, centerLon);
+
+            Map<String, WazeAlertData> dedupMap = new LinkedHashMap<>();
+            queryServerDedup(top, bottom, left, right, env, dedupMap);
+
+            // ── Step 4: map to SabreAlert ─────────────────────────────────
+            List<SabreAlert> results = new ArrayList<>();
+            for (WazeAlertData wa : dedupMap.values()) {
+                String sabreType = AlertMapper.fromWazeType(wa.type, wa.subtype);
+                if (sabreType == null) continue;
+                results.add(new SabreAlert(
+                        "waze_" + wa.id, "Waze",
+                        sabreType,
+                        wa.lat, wa.lon, wa.magvar,
+                        wa.street, wa.pubMillis / 1000L));
+            }
+
+            Log.d(TAG, "Waze: " + results.size() + " alerts mapped from " +
+                    dedupMap.size() + " raw");
+            return results;
+
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            Log.w(TAG, "Waze fetch interrupted");
+            return new ArrayList<>();
         } catch (Exception e) {
             Log.w(TAG, "Waze fetch failed: " + e.getMessage());
-        }
-        return results;
-    }
-
-    private void initSession() {
-        try {
-            httpGet(INIT_URL, null);
-            Log.d(TAG, "Waze session init done, cookies: " +
-                    cookieManager.getCookieStore().getCookies().size());
-        } catch (Exception e) {
-            Log.w(TAG, "Waze session init failed: " + e.getMessage());
+            return new ArrayList<>();
         }
     }
 
-    private String httpGet(String urlStr, String referer) throws Exception {
-        HttpURLConnection conn = (HttpURLConnection) new URL(urlStr).openConnection();
-        try {
-            conn.setRequestMethod("GET");
-            conn.setRequestProperty("User-Agent", USER_AGENT);
-            conn.setRequestProperty("Accept", "application/json, */*");
-            if (referer != null) {
-                conn.setRequestProperty("Referer", referer);
+    // ── Adaptive tiling (mirrors wzsabre 1.8 queryServer recursion) ──────────
+
+    private void queryServerDedup(double top, double bottom, double left, double right,
+                                   String env, Map<String, WazeAlertData> out)
+            throws Exception {
+        List<WazeAlertData> alerts = queryServer(top, bottom, left, right, env);
+        if (alerts == null) return;
+
+        double area = Math.abs((top - bottom) * (right - left));
+        if (alerts.size() < TILE_ALERT_THRESHOLD || area <= 1e-4) {
+            // Base case: below threshold or tiny tile — just accept results
+            for (WazeAlertData a : alerts) out.put(a.id, a);
+            return;
+        }
+
+        // Split the tile and recurse into each half (sequential, same thread)
+        Log.d(TAG, "Tiling: " + alerts.size() + " alerts, splitting bounds");
+        double height = top - bottom;
+        double width  = right - left;
+        if (height > width) {
+            // split horizontally
+            double mid = (top + bottom) / 2.0;
+            queryServerDedup(top,    mid,    left, right, env, out);
+            queryServerDedup(mid,    bottom, left, right, env, out);
+        } else {
+            // split vertically
+            double mid = (left + right) / 2.0;
+            queryServerDedup(top, bottom, left,  mid,   env, out);
+            queryServerDedup(top, bottom, mid,   right, env, out);
+        }
+    }
+
+    private List<WazeAlertData> queryServer(double top, double bottom,
+                                             double left, double right,
+                                             String env)
+            throws Exception {
+        HttpUrl url = HttpUrl.parse(GEORSS_URL).newBuilder()
+                .addQueryParameter("top",    String.valueOf(top))
+                .addQueryParameter("bottom", String.valueOf(bottom))
+                .addQueryParameter("left",   String.valueOf(left))
+                .addQueryParameter("right",  String.valueOf(right))
+                .addQueryParameter("types",  "alerts")
+                .addQueryParameter("env",    env)
+                .build();
+
+        Log.d(TAG, "GET " + url);
+
+        Request.Builder rb = new Request.Builder()
+                .url(url)
+                .header("User-Agent", USER_AGENT)
+                .header("Referer",    REFERER);
+        if (!sessionCookies.isEmpty()) rb.header("Cookie", sessionCookies);
+        Request request = rb.build();
+
+        try (Response response = httpClient.newCall(request).execute()) {
+            int code = response.code();
+            Log.d(TAG, "HTTP " + code);
+            if (code != 200) {
+                Log.w(TAG, "Unexpected HTTP " + code);
+                return new ArrayList<>();
             }
-            conn.setConnectTimeout(10_000);
-            conn.setReadTimeout(10_000);
-            conn.setInstanceFollowRedirects(true);
-
-            int code = conn.getResponseCode();
-            Log.d(TAG, "GET " + urlStr + " → HTTP " + code);
-            if (code != 200) return null;
-
-            BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(conn.getInputStream(), "UTF-8"));
-            StringBuilder sb = new StringBuilder();
-            String line;
-            while ((line = reader.readLine()) != null) sb.append(line);
-            reader.close();
-            return sb.toString();
-        } finally {
-            conn.disconnect();
+            ResponseBody body = response.body();
+            if (body == null) return new ArrayList<>();
+            String json = body.string();
+            return parseAlerts(json);
         }
     }
 
-    private List<SabreAlert> parseAlerts(String json) throws Exception {
-        List<SabreAlert> alerts = new ArrayList<>();
-        JSONObject root = new JSONObject(json);
+    // ── JSON parsing ──────────────────────────────────────────────────────────
 
-        if (!root.has("alerts")) return alerts;
-        JSONArray wazeAlerts = root.getJSONArray("alerts");
+    private List<WazeAlertData> parseAlerts(String json) throws Exception {
+        List<WazeAlertData> list = new ArrayList<>();
+        if (json == null || json.isEmpty()) return list;
+
+        JSONObject root       = new JSONObject(json);
+        JSONArray  wazeAlerts = root.optJSONArray("alerts");
+        if (wazeAlerts == null) return list;
 
         for (int i = 0; i < wazeAlerts.length(); i++) {
             JSONObject wa = wazeAlerts.getJSONObject(i);
 
-            String type    = wa.optString("type", "");
-            String subtype = wa.optString("subtype", "");
-            String sabreType = AlertMapper.fromWazeType(type, subtype);
-            if (sabreType == null) continue;
-
             JSONObject loc = wa.optJSONObject("location");
             if (loc == null) continue;
-            double lon = loc.optDouble("x", 0);
-            double lat = loc.optDouble("y", 0);
-            if (lat == 0 && lon == 0) continue;
+            double lon = loc.optDouble("x", Double.NaN);
+            double lat = loc.optDouble("y", Double.NaN);
+            if (Double.isNaN(lat) || Double.isNaN(lon)) continue;
 
-            String id     = wa.optString("uuid", wa.optString("id", "waze_" + i));
-            String street = wa.optString("street", wa.optString("city", "Unknown"));
-            long ts       = wa.optLong("pubMillis", System.currentTimeMillis()) / 1000;
-            double heading = wa.optDouble("magvar", 0);
+            WazeAlertData d = new WazeAlertData();
+            d.type     = wa.optString("type",    "");
+            d.subtype  = wa.optString("subtype", "");
+            d.lat      = lat;
+            d.lon      = lon;
+            d.magvar   = wa.optInt   ("magvar",   0);
+            d.pubMillis = wa.optLong ("pubMillis", System.currentTimeMillis());
+            d.street   = wa.optString("street",  null);
 
-            alerts.add(new SabreAlert(
-                    "waze_" + id, "Waze",
-                    sabreType,
-                    lat, lon, heading,
-                    street, ts
-            ));
+            // Prefer uuid, fall back to id
+            String uuid = wa.optString("uuid", "");
+            String id   = wa.optString("id",   "");
+            d.id        = !uuid.isEmpty() ? uuid : (!id.isEmpty() ? id : "waze_" + i);
+
+            list.add(d);
         }
-        return alerts;
+        return list;
+    }
+
+    // ── Region detection (matches wzsabre 1.8 RegionEstimator defaults) ───────
+
+    /**
+     * Returns "na" for North America, "il" for Israel, "row" elsewhere.
+     * Uses simple bounding-box checks that cover the same territory as the
+     * polygon-based RegionEstimator in wzsabre 1.8.
+     */
+    private static String getRegion(double lat, double lon) {
+        // North America: roughly covers continental US, Canada, Alaska, Hawaii, Caribbean
+        if (lon >= -170.0 && lon <= -52.0 && lat >= -15.0 && lat <= 73.0) return "na";
+        // Also includes Guam / western Pacific outliers wzsabre maps to "na"
+        if (lon >= 144.0 && lon <= 146.5 && lat >= 12.0 && lat <= 21.0)  return "na";
+        // Israel
+        if (lon >= 34.0 && lon <= 36.0 && lat >= 29.5 && lat <= 33.5)   return "il";
+        return "row";
+    }
+
+    // ── Internal data holder ──────────────────────────────────────────────────
+
+    private static final class WazeAlertData {
+        String type, subtype, id, street;
+        double lat, lon, magvar;
+        long   pubMillis;
     }
 }

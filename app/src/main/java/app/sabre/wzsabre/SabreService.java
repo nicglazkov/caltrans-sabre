@@ -9,6 +9,9 @@ import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
 
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -129,15 +132,16 @@ public class SabreService extends Service {
         JSONArray alertsArray = new JSONArray();
         for (SabreAlert a : alerts) {
             JSONObject obj = new JSONObject();
-            obj.put("alert_source", a.alertSource);
-            obj.put("alert_id",     a.alertId);
-            obj.put("type",         a.type);
-            obj.put("lat",          a.lat);
-            obj.put("lon",          a.lon);
-            obj.put("heading_deg",  a.headingDeg);
-            obj.put("street_name",  a.streetName);
-            obj.put("report_ts",    (int)(a.reportTs));
-            obj.put("confirm_ts",   JSONObject.NULL);
+            obj.put("alert_source",  a.alertSource);
+            obj.put("alert_id",      a.alertId);
+            obj.put("user_id",       extractUserId(a.alertId));  // required by HR's serializer
+            obj.put("type",          a.type);
+            obj.put("lat",           a.lat);
+            obj.put("lon",           a.lon);
+            obj.put("heading_deg",   a.headingDeg);
+            obj.put("street_name",   a.streetName);
+            obj.put("report_ts",     (int)(a.reportTs));
+            obj.put("confirm_ts",    JSONObject.NULL);
             obj.put("confirm_count", 0);
             alertsArray.put(obj);
         }
@@ -151,6 +155,26 @@ public class SabreService extends Service {
         sendBroadcast(intent);
         Log.d(TAG, "Response sent to: " + responseAction);
         Log.d(TAG, "Response JSON: " + responseJson);
+    }
+
+    /**
+     * Extracts user_id from an alert ID, matching wzsabre 1.8's USER_ID_REGEX = "alert-(\\d*)/.*"
+     * Waze alert IDs from the georss API look like "alert-1234567890/abcdef".
+     * Our alertId prefix is "waze_" so we strip that before matching.
+     * Returns "0" if no numeric user ID is found (CHP alerts, anonymous Waze alerts).
+     */
+    private static final Pattern USER_ID_PATTERN = Pattern.compile("alert-(\\d*)/.*");
+
+    private static String extractUserId(String alertId) {
+        if (alertId == null) return "0";
+        // Strip our internal prefix before matching
+        String id = alertId.startsWith("waze_") ? alertId.substring(5) : alertId;
+        Matcher m = USER_ID_PATTERN.matcher(id);
+        if (m.find()) {
+            String uid = m.group(1);
+            return (uid != null && !uid.isEmpty()) ? uid : "0";
+        }
+        return "0";
     }
 
     private void createNotificationChannel() {

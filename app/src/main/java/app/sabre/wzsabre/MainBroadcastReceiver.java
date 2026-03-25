@@ -3,7 +3,14 @@ package app.sabre.wzsabre;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
+
+import androidx.work.Data;
+import androidx.work.OneTimeWorkRequest;
+import androidx.work.OutOfQuotaPolicy;
+import androidx.work.WorkManager;
+
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -18,13 +25,7 @@ public class MainBroadcastReceiver extends BroadcastReceiver {
             if ("app.sabre.HANDSHAKE".equals(action) || "app.sabre.wzsabre.HANDSHAKE".equals(action)) {
                 handleHandshake(context, intent);
             } else if ("app.sabre.wzsabre.FETCH_REQUEST".equals(action)) {
-                // Relay to SabreService which runs as a foreground service and has network access.
-                // startService() delivers a new intent to the ALREADY-RUNNING service without
-                // triggering the ForegroundServiceStartNotAllowedException.
-                Intent svc = new Intent(context, SabreService.class);
-                svc.putExtra("action", "FETCH_REQUEST");
-                svc.putExtra("data", intent.getStringExtra("data"));
-                context.startService(svc);
+                startSabreService(context, "FETCH_REQUEST", intent.getStringExtra("data"));
             } else if (action != null && action.contains("SHUTDOWN")) {
                 // HR sends SHUTDOWN when ending a session but immediately starts a new one.
                 // Keep the service running so the next FETCH_REQUEST can be handled.
@@ -32,6 +33,69 @@ public class MainBroadcastReceiver extends BroadcastReceiver {
             }
         } catch (Exception e) {
             Log.e(TAG, "Error handling broadcast", e);
+        }
+    }
+
+    /**
+     * Starts SabreService as a foreground service.
+     * Must use startForegroundService() on API 26+ — plain startService() causes the process
+     * to not have an active FGS, which allows Android 15's app freezer to freeze it.
+     * A frozen process silently drops incoming broadcasts (FETCH_REQUEST), causing the
+     * "Crowd-Sourced Alert Problems" state in HR.
+     *
+     * This is only called from FETCH_REQUEST (sent by HR while it's in the foreground), which
+     * gives us a temp allowlist that permits the foreground service start.
+     */
+    /**
+     * Starts SabreService, mirroring wzsabre 1.8's ForegroundServiceStarter:
+     *  1. Try startForegroundService() — works when we have a temp allowlist
+     *     (e.g., FETCH_REQUEST sent by HR while it's in the foreground).
+     *  2. Fall back to WorkManager expedited task — bypasses Android 12-15 background
+     *     FGS restrictions.  This is the key fix for cold-start "Crowd-Sourced Alert
+     *     Problems": our process may be frozen, but WorkManager can wake it.
+     */
+    private void startSabreService(Context context, String action, String data) {
+        Intent svc = new Intent(context, SabreService.class);
+        if (action != null) svc.putExtra("action", action);
+        if (data   != null) svc.putExtra("data",   data);
+
+        boolean started = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            try {
+                context.startForegroundService(svc);
+                started = true;
+            } catch (Exception e) {
+                Log.w(TAG, "startForegroundService denied, falling back to WorkManager: " + e.getMessage());
+            }
+        } else {
+            try {
+                context.startService(svc);
+                started = true;
+            } catch (Exception e) {
+                Log.w(TAG, "startService failed: " + e.getMessage());
+            }
+        }
+
+        if (!started) {
+            startViaWorkManager(context, action, data);
+        }
+    }
+
+    private void startViaWorkManager(Context context, String action, String data) {
+        try {
+            Data.Builder inputData = new Data.Builder();
+            if (action != null) inputData.putString(ServiceStartWorker.KEY_ACTION, action);
+            if (data   != null) inputData.putString(ServiceStartWorker.KEY_DATA,   data);
+
+            OneTimeWorkRequest work = new OneTimeWorkRequest.Builder(ServiceStartWorker.class)
+                    .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                    .setInputData(inputData.build())
+                    .build();
+
+            WorkManager.getInstance(context).enqueue(work);
+            Log.d(TAG, "Enqueued WorkManager task for action: " + action);
+        } catch (Exception e) {
+            Log.e(TAG, "WorkManager fallback failed: " + e.getMessage());
         }
     }
 
