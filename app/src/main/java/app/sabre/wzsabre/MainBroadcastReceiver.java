@@ -37,46 +37,30 @@ public class MainBroadcastReceiver extends BroadcastReceiver {
     }
 
     /**
-     * Starts SabreService as a foreground service.
-     * Must use startForegroundService() on API 26+ — plain startService() causes the process
-     * to not have an active FGS, which allows Android 15's app freezer to freeze it.
-     * A frozen process silently drops incoming broadcasts (FETCH_REQUEST), causing the
-     * "Crowd-Sourced Alert Problems" state in HR.
+     * Starts SabreService from a BroadcastReceiver context.
      *
-     * This is only called from FETCH_REQUEST (sent by HR while it's in the foreground), which
-     * gives us a temp allowlist that permits the foreground service start.
-     */
-    /**
-     * Starts SabreService, mirroring wzsabre 1.8's ForegroundServiceStarter:
-     *  1. Try startForegroundService() — works when we have a temp allowlist
-     *     (e.g., FETCH_REQUEST sent by HR while it's in the foreground).
-     *  2. Fall back to WorkManager expedited task — bypasses Android 12-15 background
-     *     FGS restrictions.  This is the key fix for cold-start "Crowd-Sourced Alert
-     *     Problems": our process may be frozen, but WorkManager can wake it.
+     * Key insight from Android 15 logcat analysis:
+     *   startForegroundService() → DENIED (uidBFSL: n/a, tempAllowListReason: null)
+     *   WorkManager startForegroundService() → also DENIED (uidState: TRNB)
+     *
+     * The BFSL (Background Foreground Service Launch) restriction only applies to
+     * startForegroundService(). Plain startService() is NOT subject to BFSL checks and
+     * CAN be called from a BroadcastReceiver (RCVR state gives a temporary service-start
+     * allowlist). SabreService then promotes itself to foreground by calling startForeground()
+     * from within its own onCreate(), which is not subject to BFSL checks either.
+     *
+     * WorkManager is kept as final fallback in case even startService() fails.
      */
     private void startSabreService(Context context, String action, String data) {
         Intent svc = new Intent(context, SabreService.class);
         if (action != null) svc.putExtra("action", action);
         if (data   != null) svc.putExtra("data",   data);
 
-        boolean started = false;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            try {
-                context.startForegroundService(svc);
-                started = true;
-            } catch (Exception e) {
-                Log.w(TAG, "startForegroundService denied, falling back to WorkManager: " + e.getMessage());
-            }
-        } else {
-            try {
-                context.startService(svc);
-                started = true;
-            } catch (Exception e) {
-                Log.w(TAG, "startService failed: " + e.getMessage());
-            }
-        }
-
-        if (!started) {
+        try {
+            context.startService(svc);
+            Log.d(TAG, "startService succeeded for action: " + action);
+        } catch (Exception e) {
+            Log.w(TAG, "startService failed, trying WorkManager: " + e.getMessage());
             startViaWorkManager(context, action, data);
         }
     }
@@ -95,7 +79,7 @@ public class MainBroadcastReceiver extends BroadcastReceiver {
             WorkManager.getInstance(context).enqueue(work);
             Log.d(TAG, "Enqueued WorkManager task for action: " + action);
         } catch (Exception e) {
-            Log.e(TAG, "WorkManager fallback failed: " + e.getMessage());
+            Log.e(TAG, "WorkManager fallback also failed: " + e.getMessage());
         }
     }
 
