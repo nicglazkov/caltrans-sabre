@@ -2,9 +2,9 @@ package app.sabre.wzsabre;
 
 import android.net.Network;
 import android.util.Log;
-import android.util.Xml;
 
 import org.xmlpull.v1.XmlPullParser;
+import org.xmlpull.v1.XmlPullParserFactory;
 
 import java.io.StringReader;
 import java.net.URL;
@@ -61,10 +61,11 @@ public class CHPSource {
         }
     }
 
-    private List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
+    List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
                                        double radiusMeters) throws Exception {
         List<SabreAlert> alerts = new ArrayList<>();
-        XmlPullParser parser = Xml.newPullParser();
+        XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
+        XmlPullParser parser = factory.newPullParser();
         parser.setInput(new StringReader(xml));
 
         // State for the current <Log> being parsed
@@ -139,7 +140,7 @@ public class CHPSource {
 
         return new SabreAlert(
                 "chp_" + logId,
-                "CHP",
+                SabreResponseBuilder.SOURCE_CHP,  // must match declared source id in HANDSHAKE
                 sabreType,
                 lat, lon,
                 0.0,
@@ -149,7 +150,7 @@ public class CHPSource {
     }
 
     /** "37721302:122169832"  →  [37.721302, -122.169832] */
-    private static double[] parseLatLon(String latlon) {
+    static double[] parseLatLon(String latlon) {
         String[] parts = latlon.split(":");
         double lat = Long.parseLong(parts[0].trim()) / 1_000_000.0;
         double lon = -(Long.parseLong(parts[1].trim()) / 1_000_000.0);

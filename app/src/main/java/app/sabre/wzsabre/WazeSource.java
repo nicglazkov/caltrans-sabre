@@ -99,7 +99,7 @@ public class WazeSource {
                 String sabreType = AlertMapper.fromWazeType(wa.type, wa.subtype);
                 if (sabreType == null) continue;
                 results.add(new SabreAlert(
-                        "waze_" + wa.id, "Waze",
+                        "waze_" + wa.id, SabreResponseBuilder.SOURCE_WAZE,  // must match declared source id
                         sabreType,
                         wa.lat, wa.lon, wa.magvar,
                         wa.street, wa.pubMillis / 1000L));
