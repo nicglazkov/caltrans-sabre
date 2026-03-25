@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <queries>
+        <package android:name="com.highwayradar.app" />
+    </queries>
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="CHP + Waze SABRE"
+        android:theme="@android:style/Theme.Material.Light">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- SABRE Broadcast Receiver -->
+        <receiver
+            android:name=".MainBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="app.sabre.HANDSHAKE" />
+                <action android:name="app.sabre.wzsabre.HANDSHAKE" />
+                <action android:name="app.sabre.wzsabre.FETCH_REQUEST" />
+                <action android:name="app.sabre.wzsabre.SUBMIT_REPORT" />
+                <action android:name="app.sabre.wzsabre.CONFIRM_REPORT" />
+                <action android:name="app.sabre.wzsabre.DISCARD_REPORT" />
+                <action android:name="app.sabre.wzsabre.SHUTDOWN" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Foreground Service -->
+        <service
+            android:name=".SabreService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+    </application>
+</manifest>
