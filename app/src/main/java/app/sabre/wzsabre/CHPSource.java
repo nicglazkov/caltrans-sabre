@@ -10,35 +10,43 @@ import java.io.StringReader;
 import java.net.URL;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
  * Fetches and parses the CHP statewide live incident XML feed.
- * Filters to alerts within radiusMeters of the given center point.
+ * Filters by radius, incident age, and the per-category settings in ChpConfig.
  */
 public class CHPSource {
-    private static final String TAG = "CHPSource";
+    private static final String TAG     = "CHPSource";
     private static final String CHP_URL = "https://media.chp.ca.gov/sa_xml/sa.xml";
-    private static final int TIMEOUT_MS = 12000;
+    private static final int TIMEOUT_MS = 12_000;
 
-    public List<SabreAlert> fetchAlerts(double centerLat, double centerLon, double radiusMeters) {
-        return fetchAlerts(centerLat, centerLon, radiusMeters, null);
-    }
+    // CHP times are Pacific; parse in that zone so age comparisons are correct
+    private static final TimeZone TZ_PACIFIC = TimeZone.getTimeZone("America/Los_Angeles");
 
-    public List<SabreAlert> fetchAlerts(double centerLat, double centerLon, double radiusMeters,
-                                         Network network) {
+    public List<SabreAlert> fetchAlerts(double centerLat, double centerLon,
+                                         double radiusMeters, ChpConfig config) {
         List<SabreAlert> results = new ArrayList<>();
         try {
-            String xml = fetchXml(network);
-            results = parseXml(xml, centerLat, centerLon, radiusMeters);
+            String xml = fetchXml(null);
+            results = parseXml(xml, centerLat, centerLon, radiusMeters, config);
             Log.d(TAG, "CHP: " + results.size() + " alerts within radius");
         } catch (Exception e) {
             Log.e(TAG, "Failed to fetch CHP data: " + e.getMessage());
         }
         return results;
+    }
+
+    /** Overload kept for tests that don't use config (passes null → all defaults). */
+    public List<SabreAlert> fetchAlerts(double centerLat, double centerLon,
+                                         double radiusMeters) {
+        return fetchAlerts(centerLat, centerLon, radiusMeters, null);
     }
 
     private String fetchXml(Network network) throws Exception {
@@ -62,13 +70,12 @@ public class CHPSource {
     }
 
     List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
-                                       double radiusMeters) throws Exception {
+                               double radiusMeters, ChpConfig config) throws Exception {
         List<SabreAlert> alerts = new ArrayList<>();
         XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
         XmlPullParser parser = factory.newPullParser();
         parser.setInput(new StringReader(xml));
 
-        // State for the current <Log> being parsed
         String logId = null, logTime = null, logType = null;
         String location = null, area = null, latlon = null;
         String currentTag = null;
@@ -79,7 +86,6 @@ public class CHPSource {
                 case XmlPullParser.START_TAG:
                     currentTag = parser.getName();
                     if ("Log".equals(currentTag)) {
-                        // Reset state for new Log entry
                         logId = parser.getAttributeValue(null, "ID");
                         logTime = null; logType = null;
                         location = null; area = null; latlon = null;
@@ -89,17 +95,17 @@ public class CHPSource {
                 case XmlPullParser.TEXT:
                     String text = cleanValue(parser.getText());
                     if (text.isEmpty()) break;
-                    if ("LogTime".equals(currentTag))     logTime = text;
-                    else if ("LogType".equals(currentTag))     logType = text;
-                    else if ("Location".equals(currentTag))    location = text;
-                    else if ("Area".equals(currentTag))        area = text;
-                    else if ("LATLON".equals(currentTag))      latlon = text;
+                    if      ("LogTime".equals(currentTag))  logTime   = text;
+                    else if ("LogType".equals(currentTag))  logType   = text;
+                    else if ("Location".equals(currentTag)) location  = text;
+                    else if ("Area".equals(currentTag))     area      = text;
+                    else if ("LATLON".equals(currentTag))   latlon    = text;
                     break;
 
                 case XmlPullParser.END_TAG:
                     if ("Log".equals(parser.getName()) && logId != null && latlon != null) {
-                        SabreAlert alert = buildAlert(logId, logType, location, area,
-                                latlon, centerLat, centerLon, radiusMeters);
+                        SabreAlert alert = buildAlert(logId, logType, logTime, location, area,
+                                latlon, centerLat, centerLon, radiusMeters, config);
                         if (alert != null) alerts.add(alert);
                     }
                     if ("Log".equals(parser.getName())) currentTag = null;
@@ -110,44 +116,77 @@ public class CHPSource {
         return alerts;
     }
 
-    private SabreAlert buildAlert(String logId, String logType, String location,
-                                   String area, String latlon,
-                                   double centerLat, double centerLon, double radiusMeters) {
-        // Skip if no GPS fix
+    /** Kept for tests that call the old 4-arg overload. */
+    List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
+                               double radiusMeters) throws Exception {
+        return parseXml(xml, centerLat, centerLon, radiusMeters, null);
+    }
+
+    private SabreAlert buildAlert(String logId, String logType, String logTime,
+                                   String location, String area, String latlon,
+                                   double centerLat, double centerLon, double radiusMeters,
+                                   ChpConfig config) {
+        // ── coordinate validation ───────────────────────────────────────────
         if (latlon == null || latlon.equals("0:0") || latlon.startsWith("0:")) return null;
-
         double[] coords;
-        try {
-            coords = parseLatLon(latlon);
-        } catch (Exception e) {
-            return null;
-        }
-        double lat = coords[0];
-        double lon = coords[1];
-
-        // Skip obviously invalid coordinates
+        try { coords = parseLatLon(latlon); } catch (Exception e) { return null; }
+        double lat = coords[0], lon = coords[1];
         if (lat == 0.0 && lon == 0.0) return null;
-
-        // Distance filter
         if (haversineMeters(centerLat, centerLon, lat, lon) > radiusMeters) return null;
 
-        // Map to SABRE type — null means we skip this incident type
-        String sabreType = AlertMapper.fromChpLogType(logType);
-        if (sabreType == null) return null;
+        // ── always-excluded types (admin, not traffic-relevant) ──────────────
+        ChpCategory category = AlertMapper.categoryFor(logType);
+        if (category == null) return null;  // SILVER / MISSING
+
+        // ── incident age filter ──────────────────────────────────────────────
+        long reportTs = parseLogTime(logTime);  // 0 if unparseable
+        if (reportTs == 0) reportTs = System.currentTimeMillis() / 1000;
+
+        if (config != null && config.maxAgeMinutes > 0) {
+            long cutoffSecs = System.currentTimeMillis() / 1000 - config.maxAgeMinutes * 60L;
+            if (reportTs > 0 && reportTs < cutoffSecs) return null;  // too old
+        }
+
+        // ── category filter + type resolution ────────────────────────────────
+        String naturalType = AlertMapper.fromChpLogType(logType);
+        String finalType;
+        if (config != null) {
+            finalType = config.resolveType(category, naturalType);
+        } else {
+            finalType = (category.defaultType != null) ? category.defaultType : naturalType;
+        }
+        if (finalType == null) return null;  // category disabled
 
         String streetName = buildStreetName(location, area);
-        long reportTs = System.currentTimeMillis() / 1000;
-
         return new SabreAlert(
                 "chp_" + logId,
-                SabreResponseBuilder.SOURCE_CHP,  // must match declared source id in HANDSHAKE
-                sabreType,
-                lat, lon,
-                0.0,
-                streetName,
-                reportTs
-        );
+                SabreResponseBuilder.SOURCE_CHP,
+                finalType, lat, lon, 0.0, streetName, reportTs);
     }
+
+    // ── Time parsing ──────────────────────────────────────────────────────────
+
+    /**
+     * Parses CHP LogTime.  CHP uses two observed formats:
+     *   "03/25/2026 10:00 AM"   (12-hour)
+     *   "03/25/2026 14:00"      (24-hour, less common)
+     * Returns unix seconds (0 on failure).
+     */
+    static long parseLogTime(String logTime) {
+        if (logTime == null || logTime.isEmpty()) return 0;
+        String[] formats = { "MM/dd/yyyy hh:mm a", "MM/dd/yyyy HH:mm" };
+        for (String fmt : formats) {
+            try {
+                SimpleDateFormat sdf = new SimpleDateFormat(fmt, Locale.US);
+                sdf.setTimeZone(TZ_PACIFIC);
+                Date d = sdf.parse(logTime);
+                if (d != null) return d.getTime() / 1000;
+            } catch (Exception ignored) {}
+        }
+        return 0;
+    }
+
+    // ── Utilities ─────────────────────────────────────────────────────────────
 
     /** "37721302:122169832"  →  [37.721302, -122.169832] */
     static double[] parseLatLon(String latlon) {

@@ -7,6 +7,39 @@ public class AlertMapper {
 
     // ── CHP ──────────────────────────────────────────────────────────────────
 
+    /**
+     * Returns which category a CHP log type belongs to.
+     * Returns null for administrative types (SILVER ALERT, MISSING) that are
+     * always excluded regardless of config.
+     */
+    public static ChpCategory categoryFor(String logType) {
+        if (logType == null) return null;
+        String t = logType.toUpperCase();
+        if (t.contains("SILVER") || t.contains("MISSING")) return null;
+
+        if (t.contains("1179") || t.contains("1141") || t.contains("1183") ||
+            t.contains("1144") || t.contains("FATAL") || t.contains("SIG ALERT"))
+            return ChpCategory.MAJOR_ACCIDENT;
+
+        if (t.contains("1182") || t.contains("20002"))
+            return ChpCategory.MINOR_ACCIDENT;
+
+        if (t.contains("1184") || t.contains("CZP") || t.contains("MZP"))
+            return ChpCategory.POLICE_ON_ROAD;
+
+        if (t.contains("CLOSURE") || t.contains("TADV"))
+            return ChpCategory.CONGESTION;
+
+        if (t.contains("WIND") || t.contains("FOG") ||
+            t.contains("SNOW") || t.contains("ICE") || t.contains("CHAIN") ||
+            t.contains("1013") || t.contains("WEATHER") || t.contains("ROAD CONDITION") ||
+            t.contains("ESCORT"))
+            return ChpCategory.WEATHER;
+
+        // debris, fire, and catch-all unknowns
+        return ChpCategory.DEBRIS;
+    }
+
     public static String fromChpLogType(String logType) {
         if (logType == null) return null;
         String t = logType.toUpperCase();
