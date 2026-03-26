@@ -17,9 +17,10 @@ local.properties
 # App module build output
 app/build/
 
-# Signing keys
+# Signing keys — never commit these
 *.keystore
 *.jks
+keystore.properties
 
 # Firebase (if added later)
 google-services.json
