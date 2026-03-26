@@ -10,6 +10,67 @@
 
 No NDK or additional toolchains needed.
 
+## Making a release
+
+### One-time setup: create your signing keystore
+
+The keystore is what lets users upgrade the app without reinstalling. **Keep it backed up and private — if you lose it you can't release updates.**
+
+```bash
+# Generate keystore (run once; keep the output passwords somewhere safe)
+JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+"$JAVA_HOME/bin/keytool" \
+  -genkey -v \
+  -keystore app/caltrans-sabre.keystore \
+  -keyalg RSA -keysize 2048 -validity 10000 \
+  -alias caltrans-sabre \
+  -dname "CN=caltrans-sabre, O=, L=CA, ST=California, C=US" \
+  -storepass YOUR_PASSWORD \
+  -keypass YOUR_PASSWORD
+```
+
+Then create `keystore.properties` at the project root (this file is gitignored):
+
+```properties
+storeFile=caltrans-sabre.keystore
+storePassword=YOUR_PASSWORD
+keyAlias=caltrans-sabre
+keyPassword=YOUR_PASSWORD
+```
+
+### Build the signed release APK
+
+```bash
+JAVA_HOME="/c/Program Files/Android/Android Studio/jbr" ./gradlew assembleRelease
+# Output: app/build/outputs/apk/release/app-release.apk
+```
+
+Verify it's properly signed:
+```bash
+JAVA_HOME="/c/Program Files/Android/Android Studio/jbr" PATH="$JAVA_HOME/bin:$PATH" \
+  "$ANDROID_SDK/build-tools/35.0.0/apksigner" verify --verbose app/build/outputs/apk/release/app-release.apk
+# Should show: Verified using v1 scheme: true, Verified using v2 scheme: true
+```
+
+### Publish the GitHub Release
+
+1. Bump `versionCode` and `versionName` in `app/build.gradle.kts`
+2. Commit, push, and tag:
+   ```bash
+   git tag v1.x
+   git push origin v1.x
+   ```
+3. Go to **github.com/nicglazkov/caltrans-sabre/releases → Draft a new release**
+4. Choose the tag, add release notes, and attach `app-release.apk` (rename to `caltrans-sabre-v1.x.apk` for clarity)
+
+Or with the [GitHub CLI](https://cli.github.com/) (`gh`):
+```bash
+gh release create v1.x \
+  "app/build/outputs/apk/release/app-release.apk#caltrans-sabre-v1.x.apk" \
+  --title "v1.x" \
+  --generate-notes
+```
+
 ## Clone and build
 
 ```bash
