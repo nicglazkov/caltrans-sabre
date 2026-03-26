@@ -27,3 +27,6 @@ google-services.json
 
 # Kotlin daemon cache
 .kotlin/
+
+
+.claude/
