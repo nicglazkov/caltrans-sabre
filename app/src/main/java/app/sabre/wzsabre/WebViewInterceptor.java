@@ -174,7 +174,7 @@ public class WebViewInterceptor {
     }
 
     // ────────────────────────────────────────────────────────────────────────
-    // JS interceptor script — verbatim from wzsabre 1.8 buildInterceptorScript()
+    // JS interceptor script — hooks XHR and fetch, calls NativeBridge.onTraffic() on each response
     // ────────────────────────────────────────────────────────────────────────
 
     private String buildInterceptorScript() {
