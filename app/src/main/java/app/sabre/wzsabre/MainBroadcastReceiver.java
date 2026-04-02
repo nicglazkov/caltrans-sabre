@@ -121,5 +121,11 @@ public class MainBroadcastReceiver extends BroadcastReceiver {
         resp.putExtra("data", response.toString());
         context.sendBroadcast(resp);
         Log.d(TAG, "Handshake response sent to: " + responseAction + " data: " + response);
+
+        // Pre-warm SabreService so it is already initialized when the first
+        // FETCH_REQUEST arrives. Without this, a cold-start service has to
+        // initialize OkHttp, WebViewInterceptor, etc. while HR is already
+        // waiting for a response, causing the "plugin not responding" error.
+        startSabreService(context, null, null);
     }
 }
