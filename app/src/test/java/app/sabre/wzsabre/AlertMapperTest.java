@@ -69,6 +69,21 @@ public class AlertMapperTest {
     @Test public void chp_sigAlert()        { assertEquals("ACCIDENT_MAJOR",  AlertMapper.fromChpLogType("SIG ALERT")); }
     @Test public void chp_nonInjury()       { assertEquals("ACCIDENT_MINOR",  AlertMapper.fromChpLogType("1182 NON-INJURY TC")); }
     @Test public void chp_hitAndRun()       { assertEquals("ACCIDENT_MINOR",  AlertMapper.fromChpLogType("20002 HIT AND RUN")); }
+
+    // Real feed LogType strings for every collision code — must map to the correct
+    // ACCIDENT severity, not fall through to the HAZARD_ON_ROAD_DEBRIS catch-all.
+    // (Regression: 1180/1181 injury collisions were rendering as road debris.)
+    @Test public void chp_1179_realString()   { assertEquals("ACCIDENT_MAJOR", AlertMapper.fromChpLogType("1179-Trfc Collision-1141 Enrt")); }
+    @Test public void chp_1180_majorInjury()  { assertEquals("ACCIDENT_MAJOR", AlertMapper.fromChpLogType("1180-Trfc Collision-Major Inj")); }
+    @Test public void chp_1181_minorInjury()  { assertEquals("ACCIDENT_MAJOR", AlertMapper.fromChpLogType("1181-Trfc Collision-Minor Inj")); }
+    @Test public void chp_1182_realString()   { assertEquals("ACCIDENT_MINOR", AlertMapper.fromChpLogType("1182-Trfc Collision-No Inj")); }
+    @Test public void chp_1183_unknownInjury(){ assertEquals("ACCIDENT_MAJOR", AlertMapper.fromChpLogType("1183-Trfc Collision-Unkn Inj")); }
+    @Test public void chp_20001_injuryHitRun(){ assertEquals("ACCIDENT_MAJOR", AlertMapper.fromChpLogType("20001-Hit and Run w/ Injuries")); }
+    @Test public void chp_20002_realString()  { assertEquals("ACCIDENT_MINOR", AlertMapper.fromChpLogType("20002-Hit and Run No Injuries")); }
+    @Test public void chp_cat_1180_isMajor()  { assertEquals(ChpCategory.MAJOR_ACCIDENT, AlertMapper.categoryFor("1180-Trfc Collision-Major Inj")); }
+    @Test public void chp_cat_1181_isMajor()  { assertEquals(ChpCategory.MAJOR_ACCIDENT, AlertMapper.categoryFor("1181-Trfc Collision-Minor Inj")); }
+    @Test public void chp_cat_1182_isMinor()  { assertEquals(ChpCategory.MINOR_ACCIDENT, AlertMapper.categoryFor("1182-Trfc Collision-No Inj")); }
+
     @Test public void chp_trafficControl()  { assertEquals("POLICE_VISIBLE",  AlertMapper.fromChpLogType("1184 PROVIDE TRAFFIC CONTROL")); }
     @Test public void chp_debris()          { assertEquals("HAZARD_ON_ROAD_DEBRIS",     AlertMapper.fromChpLogType("1125 DEBRIS IN ROAD")); }
     @Test public void chp_fire()            { assertEquals("HAZARD_ON_ROAD_DEBRIS",     AlertMapper.fromChpLogType("VEHICLE FIRE")); }
