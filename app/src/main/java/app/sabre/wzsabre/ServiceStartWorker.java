@@ -2,6 +2,7 @@ package app.sabre.wzsabre;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -40,9 +41,14 @@ public class ServiceStartWorker extends Worker {
         if (data   != null) svc.putExtra("data",   data);
 
         try {
-            // Use startService() (not startForegroundService()) to avoid BFSL restrictions.
-            // SabreService promotes itself to foreground via startForeground() in onCreate().
-            context.startService(svc);
+            // Expedited WorkManager jobs run with a brief FGS-start grant, so
+            // startForegroundService() is allowed here. SabreService promotes itself
+            // to foreground via startForeground() in onCreate().
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(svc);
+            } else {
+                context.startService(svc);
+            }
             Log.d(TAG, "Started SabreService for action: " + action);
             return Result.success();
         } catch (Exception e) {
