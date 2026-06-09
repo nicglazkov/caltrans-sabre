@@ -65,6 +65,7 @@ final class WazeSession {
 
         WazeHttpClient.HttpResult r = http.post(url(WazeConstants.PATH_STATIC),
                 body.getBytes(StandardCharsets.UTF_8), headers);
+        if (r.code >= 400) throw new WazeExceptions.WazeOperationException("register HTTP " + r.code);
         if (r.body.length == 0) throw new WazeExceptions.WazeOperationException("empty register response");
 
         WazeProto.Batch batch = WazeProto.Batch.parseFrom(r.body);
@@ -101,6 +102,12 @@ final class WazeSession {
 
         WazeHttpClient.HttpResult r = http.post(url(WazeConstants.PATH_LOGIN),
                 body.getBytes(StandardCharsets.UTF_8), headers);
+        // A 4xx here means Waze no longer accepts these credentials (anonymous
+        // accounts get purged) — classify as AccountRejected so the caller clears
+        // the persisted account and re-registers instead of failing forever.
+        if (r.code >= 400 && r.code < 500)
+            throw new WazeExceptions.AccountRejectedException("login HTTP " + r.code);
+        if (r.code >= 500) throw new WazeExceptions.WazeOperationException("login HTTP " + r.code);
         if (r.body.length == 0) throw new WazeExceptions.WazeOperationException("empty login response");
 
         WazeProto.Batch batch = WazeProto.Batch.parseFrom(r.body);
@@ -134,6 +141,12 @@ final class WazeSession {
 
         WazeHttpClient.HttpResult r = http.post(url(WazeConstants.PATH_COMMAND),
                 payload.getBytes(StandardCharsets.UTF_8), headers);
+        // 4xx on a command = the server no longer honors this session → re-login.
+        if (r.code >= 400 && r.code < 500) {
+            session = null;
+            throw new WazeExceptions.SessionExpiredException("command HTTP " + r.code);
+        }
+        if (r.code >= 500) throw new WazeExceptions.WazeOperationException("command HTTP " + r.code);
         if (r.body.length == 0) throw new WazeExceptions.WazeOperationException("empty command response");
         lastRequestMs = SystemClock.elapsedRealtime();
         return WazeProto.Batch.parseFrom(r.body);

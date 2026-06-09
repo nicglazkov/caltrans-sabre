@@ -26,20 +26,30 @@ public class MainBroadcastReceiver extends BroadcastReceiver {
                 Log.d(TAG, "Shutdown received — keeping service alive for next session");
             } else if (BuildConfig.DEBUG && action != null && action.endsWith(".WAZE_TEST")) {
                 // Debug-only: exercise the Waze RT protocol (register -> login -> query).
-                final double lat = intent.getDoubleExtra("lat", 37.8044);
-                final double lon = intent.getDoubleExtra("lon", -122.2712);
+                final double lat = numberExtra(intent, "lat", 37.8044);
+                final double lon = numberExtra(intent, "lon", -122.2712);
                 new Thread(() -> app.sabre.wzsabre.waze.WazeProtocolSource.selfTest(lat, lon)).start();
             } else if (BuildConfig.DEBUG && action != null && action.endsWith(".INJECT_TEST")) {
                 // Debug-only: toggle synthetic one-of-each-type alerts to validate HR rendering.
                 SabreService.injectTestAlerts = intent.getBooleanExtra("on", true);
-                if (intent.hasExtra("lat")) SabreService.testLat = intent.getDoubleExtra("lat", SabreService.testLat);
-                if (intent.hasExtra("lon")) SabreService.testLon = intent.getDoubleExtra("lon", SabreService.testLon);
+                if (intent.hasExtra("lat")) SabreService.testLat = numberExtra(intent, "lat", SabreService.testLat);
+                if (intent.hasExtra("lon")) SabreService.testLon = numberExtra(intent, "lon", SabreService.testLon);
                 Log.d(TAG, "injectTestAlerts=" + SabreService.injectTestAlerts
                         + " @ " + SabreService.testLat + "," + SabreService.testLon);
             }
         } catch (Exception e) {
             Log.e(TAG, "Error handling broadcast", e);
         }
+    }
+
+    /**
+     * Reads a numeric extra regardless of how it was typed: adb's --ef sends a
+     * Float, --ed a Double — getDoubleExtra() silently returns the default for a
+     * Float extra, which made the documented --ef test commands no-ops.
+     */
+    private static double numberExtra(Intent intent, String key, double dflt) {
+        Object v = intent.getExtras() != null ? intent.getExtras().get(key) : null;
+        return (v instanceof Number) ? ((Number) v).doubleValue() : dflt;
     }
 
     private void handleHandshake(Context context, Intent intent) throws Exception {

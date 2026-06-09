@@ -25,14 +25,20 @@ public class SabreService extends Service {
     private static final String CHANNEL_ID = "SabreServiceChannel";
     private static final int NOTIFICATION_ID = 1;
 
-    private ExecutorService executor;
+    // Requests and source fetches run on SEPARATE executors. If they shared one
+    // pool, stacked-up requests (HR retrying) could occupy every thread with
+    // handlers blocked on fetch futures that no free thread can run, and every
+    // response would come back empty until the queue drained.
+    private ExecutorService requestExecutor;
+    private ExecutorService fetchExecutor;
     private CHPSource chpSource;
     private app.sabre.wzsabre.waze.WazeProtocolSource wazeSource;
 
     @Override
     public void onCreate() {
         super.onCreate();
-        executor   = Executors.newFixedThreadPool(4);
+        requestExecutor = Executors.newSingleThreadExecutor();
+        fetchExecutor   = Executors.newFixedThreadPool(2);
         chpSource  = new CHPSource();
         wazeSource = new app.sabre.wzsabre.waze.WazeProtocolSource(this);
         createNotificationChannel();
@@ -55,7 +61,8 @@ public class SabreService extends Service {
 
     @Override
     public void onDestroy() {
-        if (executor != null) executor.shutdownNow();
+        if (requestExecutor != null) requestExecutor.shutdownNow();
+        if (fetchExecutor   != null) fetchExecutor.shutdownNow();
         super.onDestroy();
     }
 
@@ -64,11 +71,14 @@ public class SabreService extends Service {
     private static final long RESPONSE_BUDGET_MS = 8_000;
 
     private void handleFetchRequest(String data) {
-        executor.submit(() -> {
+        requestExecutor.submit(() -> {
+            // Parsed up front so the catch block can still answer HR with an error
+            // response — an unanswered request makes HR show "plugin not responding".
+            String requestId = null, responseAction = null;
             try {
                 JSONObject req = new JSONObject(data);
-                String requestId      = req.getString("request_id");
-                String responseAction = req.getString("response_action");
+                requestId      = req.getString("request_id");
+                responseAction = req.getString("response_action");
                 double lat    = req.has("lat")      ? req.getDouble("lat")      : req.getDouble("latitude");
                 double lon    = req.has("lon")      ? req.getDouble("lon")      : req.getDouble("longitude");
                 double radius = req.has("radius_m") ? req.getDouble("radius_m") : req.getDouble("radius");
@@ -80,9 +90,9 @@ public class SabreService extends Service {
                 // Load config fresh on each request so changes take effect immediately
                 ChpConfig chpConfig = ChpConfig.load(SabreService.this);
 
-                // CHP and Waze run in parallel (4-thread pool leaves 2 threads free here)
-                Future<List<SabreAlert>> chpFuture  = executor.submit(() -> chpSource.fetchAlerts(lat, lon, radius, chpConfig));
-                Future<List<SabreAlert>> wazeFuture = executor.submit(() -> wazeSource.fetchAlerts(lat, lon, radius));
+                // CHP and Waze run in parallel
+                Future<List<SabreAlert>> chpFuture  = fetchExecutor.submit(() -> chpSource.fetchAlerts(lat, lon, radius, chpConfig));
+                Future<List<SabreAlert>> wazeFuture = fetchExecutor.submit(() -> wazeSource.fetchAlerts(lat, lon, radius));
 
                 List<SabreAlert> allAlerts = new ArrayList<>();
 
@@ -119,8 +129,27 @@ public class SabreService extends Service {
                 sendFetchResponse(responseAction, requestId, allAlerts);
             } catch (Exception e) {
                 Log.e(TAG, "Error handling fetch request", e);
+                if (requestId != null && responseAction != null) {
+                    try {
+                        sendErrorResponse(responseAction, requestId, e);
+                    } catch (Exception e2) {
+                        Log.e(TAG, "Failed to send error response", e2);
+                    }
+                }
             }
         });
+    }
+
+    private void sendErrorResponse(String responseAction, String requestId, Exception cause)
+            throws JSONException {
+        JSONObject root = new JSONObject();
+        root.put("request_id", requestId);
+        root.put("error_message", "plugin error: " + cause.getClass().getSimpleName());
+        root.put("response", JSONObject.NULL);
+        Intent intent = new Intent(responseAction);
+        intent.putExtra("data", root.toString());
+        sendBroadcast(intent);
+        Log.w(TAG, "Error response sent to: " + responseAction);
     }
 
     /** Debug-only: toggled by the INJECT_TEST broadcast to validate HR's rendering of every type. */

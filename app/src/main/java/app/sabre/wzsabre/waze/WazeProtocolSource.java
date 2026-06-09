@@ -37,6 +37,10 @@ public final class WazeProtocolSource {
     private static final long   CACHE_TTL_MS      = 12_000L;  // refresh if older than this
     private static final double REFRESH_MOVE_KM   = 4.0;      // ...or if the center moved this far
     private static final double CACHE_DISCARD_KM  = 25.0;     // don't serve a cache from far away
+    // Don't serve a cache that hasn't been refreshable for this long (e.g. network
+    // outage / Waze down) — stale police/accident alerts presented as current are
+    // worse than no Waze data.
+    private static final long   CACHE_MAX_SERVE_AGE_MS = 10 * 60_000L;
 
     private final Context ctx;
     private final ExecutorService refreshExec = Executors.newSingleThreadExecutor();
@@ -77,7 +81,9 @@ public final class WazeProtocolSource {
                 }
             });
         }
-        if (cacheTimeMs == 0 || haversineKm(lat, lon, cacheLat, cacheLon) > CACHE_DISCARD_KM) {
+        if (cacheTimeMs == 0
+                || (now - cacheTimeMs) > CACHE_MAX_SERVE_AGE_MS
+                || haversineKm(lat, lon, cacheLat, cacheLon) > CACHE_DISCARD_KM) {
             return new ArrayList<>();
         }
         return new ArrayList<>(cache);

@@ -88,7 +88,10 @@ public class ChpConfig {
         ChpConfig cfg = new ChpConfig();
         for (ChpCategory cat : ChpCategory.values()) {
             cfg.enabled[cat.ordinal()]      = prefs.getBoolean(cat.name() + KEY_ENABLED, true);
-            cfg.typeOverride[cat.ordinal()] = prefs.getString(cat.name() + KEY_OVERRIDE, null);
+            // Validate persisted overrides: an unknown SABRE type string (corrupt or
+            // left over from an older version) would crash Highway Radar's renderer.
+            cfg.typeOverride[cat.ordinal()] =
+                    validOverrideOrNull(prefs.getString(cat.name() + KEY_OVERRIDE, null));
         }
         cfg.maxAgeMinutes = prefs.getInt(KEY_MAX_AGE, 60);
         return cfg;
@@ -132,6 +135,15 @@ public class ChpConfig {
         "HAZARD_ON_ROAD_DEBRIS",
         "HAZARD_ON_ROAD_SLIPPERY",
     };
+
+    /** Returns the override if it is one of the selectable SABRE types, else null. */
+    public static String validOverrideOrNull(String type) {
+        if (type == null) return null;
+        for (int i = 1; i < TYPE_VALUES.length; i++) {
+            if (type.equals(TYPE_VALUES[i])) return type;
+        }
+        return null;
+    }
 
     /** Returns the spinner index for a given SABRE type string (or null → 0). */
     public static int typeToSpinnerIndex(String type) {

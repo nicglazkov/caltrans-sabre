@@ -68,6 +68,7 @@ final class WazeHttpClient {
                 return new HttpResult(resp.code(), b);
             } catch (IOException e) {
                 last = e;
+                if (attempt == 3) break;   // no point sleeping after the final attempt
                 try { Thread.sleep(400L * attempt); } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw e;

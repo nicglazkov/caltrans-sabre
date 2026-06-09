@@ -79,12 +79,18 @@ public class CHPSource {
         String logId = null, logTime = null, logType = null;
         String location = null, area = null, latlon = null;
         String currentTag = null;
+        // Text is accumulated per element because the parser may deliver a single
+        // text node as multiple TEXT events (e.g. around entity references like
+        // &amp; in Location values); assigning on each event would keep only the
+        // last chunk.
+        StringBuilder text = new StringBuilder();
 
         int eventType = parser.getEventType();
         while (eventType != XmlPullParser.END_DOCUMENT) {
             switch (eventType) {
                 case XmlPullParser.START_TAG:
                     currentTag = parser.getName();
+                    text.setLength(0);
                     if ("Log".equals(currentTag)) {
                         logId = parser.getAttributeValue(null, "ID");
                         logTime = null; logType = null;
@@ -93,22 +99,28 @@ public class CHPSource {
                     break;
 
                 case XmlPullParser.TEXT:
-                    String text = cleanValue(parser.getText());
-                    if (text.isEmpty()) break;
-                    if      ("LogTime".equals(currentTag))  logTime   = text;
-                    else if ("LogType".equals(currentTag))  logType   = text;
-                    else if ("Location".equals(currentTag)) location  = text;
-                    else if ("Area".equals(currentTag))     area      = text;
-                    else if ("LATLON".equals(currentTag))   latlon    = text;
+                    text.append(parser.getText());
                     break;
 
                 case XmlPullParser.END_TAG:
-                    if ("Log".equals(parser.getName()) && logId != null && latlon != null) {
-                        SabreAlert alert = buildAlert(logId, logType, logTime, location, area,
-                                latlon, centerLat, centerLon, radiusMeters, config);
-                        if (alert != null) alerts.add(alert);
+                    String endTag = parser.getName();
+                    String value = cleanValue(text.toString());
+                    text.setLength(0);
+                    if (!value.isEmpty() && endTag.equals(currentTag)) {
+                        if      ("LogTime".equals(endTag))  logTime   = value;
+                        else if ("LogType".equals(endTag))  logType   = value;
+                        else if ("Location".equals(endTag)) location  = value;
+                        else if ("Area".equals(endTag))     area      = value;
+                        else if ("LATLON".equals(endTag))   latlon    = value;
                     }
-                    if ("Log".equals(parser.getName())) currentTag = null;
+                    if ("Log".equals(endTag)) {
+                        if (logId != null && latlon != null) {
+                            SabreAlert alert = buildAlert(logId, logType, logTime, location, area,
+                                    latlon, centerLat, centerLon, radiusMeters, config);
+                            if (alert != null) alerts.add(alert);
+                        }
+                        currentTag = null;
+                    }
                     break;
             }
             try {
@@ -178,19 +190,30 @@ public class CHPSource {
     // ── Time parsing ──────────────────────────────────────────────────────────
 
     /**
-     * Parses CHP LogTime.  CHP uses two observed formats:
-     *   "03/25/2026 10:00 AM"   (12-hour)
-     *   "03/25/2026 14:00"      (24-hour, less common)
-     * Returns unix seconds (0 on failure).
+     * Parses CHP LogTime.  Observed formats:
+     *   "Jun  9 2026  2:05PM"   (current feed: month name, space-padded day,
+     *                            12-hour time with no space before AM/PM)
+     *   "03/25/2026 10:00 AM"   (older 12-hour)
+     *   "03/25/2026 14:00"      (older 24-hour)
+     * Runs of whitespace are collapsed before parsing (the feed pads single-digit
+     * days/hours with extra spaces). Returns unix seconds (0 on failure).
      */
     static long parseLogTime(String logTime) {
-        if (logTime == null || logTime.isEmpty()) return 0;
-        String[] formats = { "MM/dd/yyyy hh:mm a", "MM/dd/yyyy HH:mm" };
+        if (logTime == null) return 0;
+        String normalized = logTime.trim().replaceAll("\\s+", " ");
+        if (normalized.isEmpty()) return 0;
+        String[] formats = {
+                "MMM d yyyy h:mma",
+                "MMM d yyyy h:mm a",
+                "MM/dd/yyyy hh:mm a",
+                "MM/dd/yyyy HH:mm",
+        };
         for (String fmt : formats) {
             try {
                 SimpleDateFormat sdf = new SimpleDateFormat(fmt, Locale.US);
                 sdf.setTimeZone(TZ_PACIFIC);
-                Date d = sdf.parse(logTime);
+                sdf.setLenient(false);
+                Date d = sdf.parse(normalized);
                 if (d != null) return d.getTime() / 1000;
             } catch (Exception ignored) {}
         }
@@ -199,11 +222,15 @@ public class CHPSource {
 
     // ── Utilities ─────────────────────────────────────────────────────────────
 
-    /** "37721302:122169832"  →  [37.721302, -122.169832] */
+    /**
+     * "37721302:122169832"  →  [37.721302, -122.169832]
+     * The feed encodes western longitude as a positive value; negate via abs so
+     * an explicit minus sign (if CHP ever adds one) doesn't flip it eastward.
+     */
     static double[] parseLatLon(String latlon) {
         String[] parts = latlon.split(":");
         double lat = Long.parseLong(parts[0].trim()) / 1_000_000.0;
-        double lon = -(Long.parseLong(parts[1].trim()) / 1_000_000.0);
+        double lon = -Math.abs(Long.parseLong(parts[1].trim()) / 1_000_000.0);
         return new double[]{lat, lon};
     }
 

@@ -30,6 +30,24 @@ public class SabreResponseBuilder {
     private static final Pattern USER_ID_PATTERN = Pattern.compile("alert-(\\d*)/.*");
 
     /**
+     * Every alert type HR's SabreFetchResponseAlert deserializer accepts. An alert
+     * with any other type string would crash HR's renderer, so unknown types are
+     * dropped in {@link #build} rather than sent.
+     */
+    private static final java.util.Set<String> VALID_TYPES = new java.util.HashSet<>(
+            java.util.Arrays.asList(
+                    "POLICE_VISIBLE", "POLICE_HIDDEN",
+                    "ACCIDENT_MAJOR", "ACCIDENT_MINOR",
+                    "HAZARD_ON_ROAD_DEBRIS", "HAZARD_ON_ROAD_CONGESTION",
+                    "HAZARD_ON_ROAD_SLIPPERY", "HAZARD_ON_ROAD_POT_HOLE",
+                    "HAZARD_WEATHER_FOG", "HAZARD_WEATHER_RAIN", "HAZARD_WEATHER_SNOW",
+                    "HAZARD_WEATHER_WIND", "HAZARD_WEATHER_STORM", "HAZARD_WEATHER_HAIL"));
+
+    public static boolean isValidType(String type) {
+        return type != null && VALID_TYPES.contains(type);
+    }
+
+    /**
      * Build the full response JSON string for a FETCH_REQUEST.
      *
      * Schema (all fields required by HR's kotlinx.serialization):
@@ -68,9 +86,16 @@ public class SabreResponseBuilder {
         responseData.put("n_batches", 1);
         responseData.put("batch_id",  0);
 
+        // One malformed alert must never take down the whole response (HR would
+        // get nothing and show "plugin not responding") — drop it and keep the rest.
         JSONArray alertsArray = new JSONArray();
         for (SabreAlert a : alerts) {
-            alertsArray.put(buildAlert(a));
+            if (a == null || !isValidType(a.type)) continue;
+            try {
+                alertsArray.put(buildAlert(a));
+            } catch (RuntimeException ignored) {
+                // invalid coords / report_ts — skip this alert only
+            }
         }
         responseData.put("alerts", alertsArray);
         root.put("response", responseData);

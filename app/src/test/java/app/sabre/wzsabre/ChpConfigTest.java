@@ -245,6 +245,99 @@ public class ChpConfigTest {
         assertEquals(0, CHPSource.parseLogTime(null));
     }
 
+    // ── Current CHP feed format: "Jun  9 2026  2:05PM" ──────────────────────
+    // (month name, space-padded day, 12-hour time, NO space before AM/PM)
+
+    @Test
+    public void parseLogTime_currentFeedFormat_parses() {
+        long ts = CHPSource.parseLogTime("Jun  9 2026  2:05PM");
+        assertTrue("current CHP feed format must parse", ts > 0);
+    }
+
+    @Test
+    public void parseLogTime_currentFeedFormat_correctEpoch() {
+        // Independent reference: build the same instant via Calendar in Pacific time
+        java.util.Calendar cal = java.util.Calendar.getInstance(
+                java.util.TimeZone.getTimeZone("America/Los_Angeles"), java.util.Locale.US);
+        cal.clear();
+        cal.set(2026, java.util.Calendar.JUNE, 9, 14, 5, 0);
+        assertEquals(cal.getTimeInMillis() / 1000, CHPSource.parseLogTime("Jun  9 2026  2:05PM"));
+    }
+
+    @Test
+    public void parseLogTime_currentFeedFormat_doubleDigitDayAndHour() {
+        java.util.Calendar cal = java.util.Calendar.getInstance(
+                java.util.TimeZone.getTimeZone("America/Los_Angeles"), java.util.Locale.US);
+        cal.clear();
+        cal.set(2026, java.util.Calendar.DECEMBER, 25, 23, 59, 0);
+        assertEquals(cal.getTimeInMillis() / 1000, CHPSource.parseLogTime("Dec 25 2026 11:59PM"));
+    }
+
+    @Test
+    public void parseLogTime_currentFeedFormat_morning() {
+        java.util.Calendar cal = java.util.Calendar.getInstance(
+                java.util.TimeZone.getTimeZone("America/Los_Angeles"), java.util.Locale.US);
+        cal.clear();
+        cal.set(2026, java.util.Calendar.JUNE, 9, 7, 36, 0);
+        assertEquals(cal.getTimeInMillis() / 1000, CHPSource.parseLogTime("Jun  9 2026  7:36AM"));
+    }
+
+    @Test
+    public void parseLogTime_currentFeedFormat_withSpaceBeforeAmPm() {
+        assertTrue(CHPSource.parseLogTime("Jun 9 2026 2:05 PM") > 0);
+    }
+
+    @Test
+    public void ageFilter_currentFeedFormat_staleIncident_isDropped() throws Exception {
+        ChpConfig cfg = allEnabled();
+        cfg.maxAgeMinutes = 60;
+        List<SabreAlert> alerts = parse("1179 INJURY TC", "Jan  1 2020  8:00AM", cfg);
+        assertTrue("old incident in current feed format must be dropped", alerts.isEmpty());
+    }
+
+    @Test
+    public void ageFilter_currentFeedFormat_freshIncident_isKept() throws Exception {
+        java.text.SimpleDateFormat fmt =
+                new java.text.SimpleDateFormat("MMM d yyyy h:mma", java.util.Locale.US);
+        fmt.setTimeZone(java.util.TimeZone.getTimeZone("America/Los_Angeles"));
+        String nowStr = fmt.format(new java.util.Date());
+        ChpConfig cfg = allEnabled();
+        cfg.maxAgeMinutes = 60;
+        List<SabreAlert> alerts = parse("1179 INJURY TC", nowStr, cfg);
+        assertEquals("fresh incident in current feed format must be kept", 1, alerts.size());
+    }
+
+    @Test
+    public void reportTs_currentFeedFormat_usesLogTime_notNow() throws Exception {
+        // 2-hour-old incident: report_ts must reflect the LogTime, not "now"
+        java.util.Date twoHoursAgo = new java.util.Date(System.currentTimeMillis() - 2 * 3600_000L);
+        java.text.SimpleDateFormat fmt =
+                new java.text.SimpleDateFormat("MMM d yyyy h:mma", java.util.Locale.US);
+        fmt.setTimeZone(java.util.TimeZone.getTimeZone("America/Los_Angeles"));
+        List<SabreAlert> alerts = parse("1179 INJURY TC", fmt.format(twoHoursAgo),
+                makeConfig(true, true, true, true, true, true, 0));
+        assertEquals(1, alerts.size());
+        long expected = twoHoursAgo.getTime() / 1000;
+        assertTrue("report_ts should be ~2h old (was " + alerts.get(0).reportTs + ")",
+                Math.abs(alerts.get(0).reportTs - expected) < 90);
+    }
+
+    // ── Override validation (corrupt prefs must not reach HR) ────────────────
+
+    @Test
+    public void validOverrideOrNull_acceptsKnownTypes() {
+        assertEquals("ACCIDENT_MAJOR", ChpConfig.validOverrideOrNull("ACCIDENT_MAJOR"));
+        assertEquals("HAZARD_ON_ROAD_SLIPPERY",
+                ChpConfig.validOverrideOrNull("HAZARD_ON_ROAD_SLIPPERY"));
+    }
+
+    @Test
+    public void validOverrideOrNull_rejectsUnknownAndNull() {
+        assertNull(ChpConfig.validOverrideOrNull("BOGUS_TYPE"));
+        assertNull(ChpConfig.validOverrideOrNull(""));
+        assertNull(ChpConfig.validOverrideOrNull(null));
+    }
+
     // ── AlertMapper.categoryFor ───────────────────────────────────────────────
 
     @Test

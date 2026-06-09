@@ -72,7 +72,6 @@ public class AlertMapper {
 
         // Road / lane closure
         if (t.contains("CLOSURE")) return "HAZARD_ON_ROAD_CONGESTION";
-        if (t.contains("1184"))    return "HAZARD_ON_ROAD_CONGESTION";
         if (t.contains("TADV"))    return "HAZARD_ON_ROAD_CONGESTION";
 
         // Weather

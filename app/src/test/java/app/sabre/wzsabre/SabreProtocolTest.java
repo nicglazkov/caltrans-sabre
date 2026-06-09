@@ -188,7 +188,7 @@ public class SabreProtocolTest {
         SabreAlert anon = new SabreAlert(
                 "waze_some-uuid-without-digits",
                 SabreResponseBuilder.SOURCE_WAZE,
-                "JAM", 34.0, -118.0, 0.0, null, NOW_SECONDS);
+                "HAZARD_ON_ROAD_CONGESTION", 34.0, -118.0, 0.0, null, NOW_SECONDS);
         JSONObject a = firstAlert(parseResponse(Collections.singletonList(anon)));
         assertEquals("0", a.getString("user_id"));
     }
@@ -207,7 +207,53 @@ public class SabreProtocolTest {
         SabreAlert bad = new SabreAlert("id", "chp", "POLICE_VISIBLE",
                 34.0, -118.0, 0.0, null,
                 (long) Integer.MAX_VALUE + 1);
-        SabreResponseBuilder.build("r", Collections.singletonList(bad));
+        SabreResponseBuilder.buildAlert(bad);
+    }
+
+    // ── build() must never let one bad alert take down the whole response ─────
+
+    @Test
+    public void build_dropsOverflowReportTs_keepsValidAlerts() throws Exception {
+        SabreAlert bad = new SabreAlert("bad", "chp", "POLICE_VISIBLE",
+                34.0, -118.0, 0.0, null, (long) Integer.MAX_VALUE + 1);
+        JSONObject root = new JSONObject(SabreResponseBuilder.build("r",
+                java.util.Arrays.asList(bad, chpAlert())));
+        JSONArray alerts = root.getJSONObject("response").getJSONArray("alerts");
+        assertEquals("bad alert dropped, valid alert kept", 1, alerts.length());
+        assertEquals("chp_12345", alerts.getJSONObject(0).getString("alert_id"));
+    }
+
+    @Test
+    public void build_dropsNaNCoords_keepsValidAlerts() throws Exception {
+        SabreAlert bad = new SabreAlert("bad", "chp", "POLICE_VISIBLE",
+                Double.NaN, -118.0, 0.0, null, NOW_SECONDS);
+        JSONObject root = new JSONObject(SabreResponseBuilder.build("r",
+                java.util.Arrays.asList(bad, chpAlert())));
+        assertEquals(1, root.getJSONObject("response").getJSONArray("alerts").length());
+    }
+
+    @Test
+    public void build_dropsUnknownType_keepsValidAlerts() throws Exception {
+        // An unknown SABRE type string would crash HR's renderer — never send it.
+        SabreAlert bad = new SabreAlert("bad", "chp", "TOTALLY_BOGUS_TYPE",
+                34.0, -118.0, 0.0, null, NOW_SECONDS);
+        SabreAlert badNull = new SabreAlert("bad2", "chp", null,
+                34.0, -118.0, 0.0, null, NOW_SECONDS);
+        JSONObject root = new JSONObject(SabreResponseBuilder.build("r",
+                java.util.Arrays.asList(bad, badNull, chpAlert())));
+        assertEquals(1, root.getJSONObject("response").getJSONArray("alerts").length());
+    }
+
+    @Test
+    public void isValidType_acceptsAllSabreTypes() {
+        String[] all = {"POLICE_VISIBLE", "POLICE_HIDDEN", "ACCIDENT_MAJOR", "ACCIDENT_MINOR",
+                "HAZARD_ON_ROAD_DEBRIS", "HAZARD_ON_ROAD_CONGESTION", "HAZARD_ON_ROAD_SLIPPERY",
+                "HAZARD_ON_ROAD_POT_HOLE", "HAZARD_WEATHER_FOG", "HAZARD_WEATHER_RAIN",
+                "HAZARD_WEATHER_SNOW", "HAZARD_WEATHER_WIND", "HAZARD_WEATHER_STORM",
+                "HAZARD_WEATHER_HAIL"};
+        for (String t : all) assertTrue(t, SabreResponseBuilder.isValidType(t));
+        assertFalse(SabreResponseBuilder.isValidType("POLICE"));
+        assertFalse(SabreResponseBuilder.isValidType(null));
     }
 
     // ── nullable fields: must be present but may be null ─────────────────────

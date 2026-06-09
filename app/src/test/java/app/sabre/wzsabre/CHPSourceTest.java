@@ -149,6 +149,60 @@ public class CHPSourceTest {
         assertEquals(-118.2437, coords[1], 0.0001);
     }
 
+    @Test
+    public void parseLatLon_explicitNegativeLon_staysWest() {
+        // If CHP ever starts sending a signed longitude, it must not flip eastward
+        double[] coords = CHPSource.parseLatLon("34052200:-118243700");
+        assertEquals(-118.2437, coords[1], 0.0001);
+    }
+
+    // ── entity references must not truncate text values ──────────────────────
+
+    @Test
+    public void parseXml_entityRefInLocation_keepsFullText() throws Exception {
+        String xml =
+            "<?xml version=\"1.0\"?><State><Log ID=\"E-1\">" +
+            "<LogType>\"1179 INJURY TC\"</LogType>" +
+            "<Location>\"I-80 WB &amp; Powell St\"</Location>" +
+            "<Area>\"San Francisco\"</Area>" +
+            "<LATLON>37774567:122419400</LATLON>" +
+            "</Log></State>";
+        List<SabreAlert> alerts = callParseXml(new CHPSource(), xml);
+        assertEquals(1, alerts.size());
+        assertEquals("Text around an entity reference must be preserved in full",
+                "I-80 WB & Powell St (San Francisco)", alerts.get(0).streetName);
+    }
+
+    // ── nested LogDetails must not pollute Log fields (real feed shape) ──────
+
+    @Test
+    public void parseXml_realFeedShape_withLogDetails() throws Exception {
+        String xml =
+            "<?xml version=\"1.0\" ?><State><Center ID = \"SAHB\"><Dispatch ID = \"STCC\">" +
+            "<Log ID = \"260609ST0188\">" +
+            "<LogTime>\"Jun  9 2026  2:05PM\"</LogTime>" +
+            "<LogType>\"1183-Trfc Collision-Unkn Inj\"</LogType>" +
+            "<Location>\"I5 N / Mossdale Rd Ofr\"</Location>" +
+            "<LocationDesc>\"NB AT\"</LocationDesc>" +
+            "<Area>\"Tracy\"</Area>" +
+            "<ThomasBrothers>\"\"</ThomasBrothers>" +
+            "<LATLON>\"37779552:121314514\"</LATLON>" +
+            "<LogDetails><details>" +
+            "<DetailTime>\"Jun  9 2026  2:08PM\"</DetailTime>" +
+            "<IncidentDetail>\"[1] OVER 6 VEHS TC\"</IncidentDetail>" +
+            "</details></LogDetails></Log>" +
+            "</Dispatch></Center></State>";
+        List<SabreAlert> alerts = new CHPSource().parseXml(xml, 37.78, -121.31, 50_000);
+        assertEquals(1, alerts.size());
+        SabreAlert a = alerts.get(0);
+        assertEquals("chp_260609ST0188", a.alertId);
+        assertEquals("ACCIDENT_MAJOR", a.type);   // 1183 = unknown-injury collision
+        assertEquals(37.779552, a.lat, 0.0001);
+        assertEquals(-121.314514, a.lon, 0.0001);
+        assertEquals("I5 N / Mossdale Rd Ofr (Tracy)", a.streetName);
+        assertTrue("report_ts must come from LogTime", a.reportTs > 0);
+    }
+
     // ── haversine distance ────────────────────────────────────────────────────
 
     @Test
