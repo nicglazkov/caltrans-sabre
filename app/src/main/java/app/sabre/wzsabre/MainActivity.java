@@ -1,9 +1,14 @@
 package app.sabre.wzsabre;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
@@ -35,14 +40,45 @@ public class MainActivity extends Activity {
 
         config = ChpConfig.load(this);
 
-        // Start the foreground service so it's ready when HR sends FETCH_REQUEST
-        Intent svc = new Intent(this, SabreService.class);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc);
-        else startService(svc);
+        // Start the foreground service so it's ready when HR sends FETCH_REQUEST.
+        // We're in the foreground here, so the start is allowed.
+        ForegroundServiceStarter.start(this, null, null);
+
+        // Ask for the exemptions that keep the plugin reachable in the background.
+        requestExemptions();
 
         updateServiceStatus();
         buildCategoryRows();
         buildAgeSpinner();
+    }
+
+    /**
+     * Requests the runtime permissions/exemptions the plugin needs to stay
+     * reachable while Highway Radar is in use:
+     *   - POST_NOTIFICATIONS (Android 13+) so the foreground-service notification shows.
+     *   - Battery-optimization exemption so Android won't freeze/Doze the process,
+     *     which would otherwise block the service from starting on FETCH_REQUEST.
+     * Both are guarded so the user is only prompted until granted.
+     */
+    private void requestExemptions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1001);
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+            if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                try {
+                    Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(Uri.parse("package:" + getPackageName()));
+                    startActivity(intent);
+                } catch (Exception ignored) {
+                    // Some OEM builds don't expose the direct request screen; ignore.
+                }
+            }
+        }
     }
 
     // ── Service status header ─────────────────────────────────────────────────

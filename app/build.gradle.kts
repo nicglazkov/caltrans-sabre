@@ -3,6 +3,7 @@ import java.util.Properties
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    id("com.google.protobuf") version "0.9.4"
 }
 
 // Load signing credentials from keystore.properties (never committed to git).
@@ -20,8 +21,8 @@ android {
         applicationId = "app.sabre.wzsabre"
         minSdk = 23
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -43,6 +44,10 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -53,10 +58,28 @@ android {
     }
 }
 
+// Generates Java from app/src/main/proto/*.proto using the protobuf-lite runtime.
+// Used to emulate the Waze mobile-app RT protocol (register/login/alert query).
+protobuf {
+    protoc {
+        artifact = "com.google.protobuf:protoc:3.25.5"
+    }
+    generateProtoTasks {
+        all().forEach { task ->
+            task.builtins {
+                create("java") {
+                    option("lite")
+                }
+            }
+        }
+    }
+}
+
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.work:work-runtime:2.9.1")
+    implementation("com.google.protobuf:protobuf-javalite:3.25.5")
     testImplementation(libs.junit)
     testImplementation("org.json:json:20240303")
     testImplementation("net.sf.kxml:kxml2:2.3.0")

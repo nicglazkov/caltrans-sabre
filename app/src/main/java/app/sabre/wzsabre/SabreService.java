@@ -27,14 +27,14 @@ public class SabreService extends Service {
 
     private ExecutorService executor;
     private CHPSource chpSource;
-    private WazeSource wazeSource;
+    private app.sabre.wzsabre.waze.WazeProtocolSource wazeSource;
 
     @Override
     public void onCreate() {
         super.onCreate();
         executor   = Executors.newFixedThreadPool(4);
         chpSource  = new CHPSource();
-        wazeSource = new WazeSource(this);
+        wazeSource = new app.sabre.wzsabre.waze.WazeProtocolSource(this);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildForegroundNotification());
         Log.d(TAG, "Service started");
@@ -111,12 +111,52 @@ public class SabreService extends Service {
                     wazeFuture.cancel(true);
                 }
 
+                if (BuildConfig.DEBUG && injectTestAlerts) {
+                    allAlerts.addAll(buildTestAlerts(testLat, testLon));
+                }
+
                 Log.d(TAG, "Sending " + allAlerts.size() + " total alerts");
                 sendFetchResponse(responseAction, requestId, allAlerts);
             } catch (Exception e) {
                 Log.e(TAG, "Error handling fetch request", e);
             }
         });
+    }
+
+    /** Debug-only: toggled by the INJECT_TEST broadcast to validate HR's rendering of every type. */
+    public static volatile boolean injectTestAlerts = false;
+    /** Fixed anchor (set by the INJECT_TEST broadcast) the synthetic alerts cluster around. */
+    public static volatile double testLat = 38.4015, testLon = -121.8000;
+
+    /**
+     * One synthetic alert of each SABRE type, lined up ~120m north of (lat,lon) and
+     * spread east-west, so driving north makes Highway Radar pop them all as stacked
+     * cards — used to visually confirm HR renders every alert type correctly.
+     */
+    private List<SabreAlert> buildTestAlerts(double lat, double lon) {
+        String[][] specs = {
+            {"POLICE_VISIBLE",            "TEST Police visible"},
+            {"POLICE_HIDDEN",             "TEST Police hidden (speed trap)"},
+            {"ACCIDENT_MAJOR",            "TEST Accident major"},
+            {"ACCIDENT_MINOR",            "TEST Accident minor"},
+            {"HAZARD_ON_ROAD_CONGESTION", "TEST Congestion / closure"},
+            {"HAZARD_ON_ROAD_DEBRIS",     "TEST Debris on road"},
+            {"HAZARD_WEATHER_FOG",        "TEST Weather (fog)"},
+        };
+        List<SabreAlert> out = new ArrayList<>();
+        long nowSec = System.currentTimeMillis() / 1000L;
+        double lonScale = 0.00025 / Math.cos(Math.toRadians(lat));
+        for (int i = 0; i < specs.length; i++) {
+            // Put the HAZARD/WEATHER types ~120m north (ahead) and the POLICE/ACCIDENT
+            // types ~3.3km north (out of the immediate card range) so the hazards can be
+            // observed in isolation, without police/accident outranking them.
+            boolean isHazard = specs[i][0].startsWith("HAZARD");
+            double aLat = lat + (isHazard ? 0.0011 : 0.0300);
+            double aLon = lon + (i - specs.length / 2.0) * lonScale; // spread E-W
+            out.add(new SabreAlert("chp_TEST" + i, SabreResponseBuilder.SOURCE_CHP,
+                    specs[i][0], aLat, aLon, 0.0, specs[i][1], nowSec));
+        }
+        return out;
     }
 
     private void sendFetchResponse(String responseAction, String requestId,

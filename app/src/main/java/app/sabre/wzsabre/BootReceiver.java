@@ -3,7 +3,6 @@ package app.sabre.wzsabre;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
 import android.util.Log;
 
 /**
@@ -21,15 +20,8 @@ public class BootReceiver extends BroadcastReceiver {
     public void onReceive(Context context, Intent intent) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
         Log.d(TAG, "Boot completed — starting SabreService");
-        Intent svc = new Intent(context, SabreService.class);
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(svc);
-            } else {
-                context.startService(svc);
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to start service on boot: " + e.getMessage());
-        }
+        // BOOT_COMPLETED is exempt from BFSL, but route through the starter so the
+        // exact-alarm / WorkManager fallbacks apply if the direct start is denied.
+        ForegroundServiceStarter.start(context, null, null);
     }
 }

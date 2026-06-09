@@ -8,6 +8,15 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Exact alarms are used to start the foreground service when a direct
+         startForegroundService() is denied by Android 15/16 BFSL restrictions.
+         USE_EXACT_ALARM is auto-granted (sideloaded app), so the bypass works
+         without the user toggling a setting. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <!-- Lets the plugin ask to be exempted from battery optimization so Android
+         won't freeze/Doze the process and block service starts at FETCH time. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <queries>
         <package android:name="com.highwayradar.app" />
@@ -27,6 +36,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Foreground launch escape hatch: HR launches this (advertised as
+             alternative_startup_activity) to bring the plugin to the foreground
+             so the service can start without BFSL restrictions. -->
+        <activity
+            android:name=".AltStartupActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- Auto-start service after device boot -->
         <receiver

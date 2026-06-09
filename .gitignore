@@ -28,5 +28,8 @@ google-services.json
 # Kotlin daemon cache
 .kotlin/
 
+# Local test artifacts (emulator screenshots, scratch feed dumps)
+/_*.png
+/_*.xml
 
 .claude/

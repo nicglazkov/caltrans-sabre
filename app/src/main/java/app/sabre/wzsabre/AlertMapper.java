@@ -17,8 +17,13 @@ public class AlertMapper {
         String t = logType.toUpperCase();
         if (t.contains("SILVER") || t.contains("MISSING")) return null;
 
-        if (t.contains("1179") || t.contains("1141") || t.contains("1183") ||
-            t.contains("1144") || t.contains("FATAL") || t.contains("SIG ALERT"))
+        // Injury / fatal collisions. 1180 (major inj), 1181 (minor inj), 1183
+        // (unknown inj), 1179 (ambulance enroute), 1141 (ambulance), 1144 (fatal),
+        // 20001 (injury hit-and-run). Per the README, ANY injury collision is a
+        // "major" accident; only no-injury collisions are "minor".
+        if (t.contains("1179") || t.contains("1180") || t.contains("1181") ||
+            t.contains("1183") || t.contains("1141") || t.contains("1144") ||
+            t.contains("20001") || t.contains("FATAL") || t.contains("SIG ALERT"))
             return ChpCategory.MAJOR_ACCIDENT;
 
         if (t.contains("1182") || t.contains("20002"))
@@ -44,10 +49,12 @@ public class AlertMapper {
         if (logType == null) return null;
         String t = logType.toUpperCase();
 
-        // Injury / fatal collisions
+        // Injury / fatal collisions (any injury = major; see categoryFor)
         if (t.contains("1179") || t.contains("1141")) return "ACCIDENT_MAJOR";
+        if (t.contains("1180") || t.contains("1181")) return "ACCIDENT_MAJOR";
         if (t.contains("1183"))                         return "ACCIDENT_MAJOR";
         if (t.contains("1144") || t.contains("FATAL")) return "ACCIDENT_MAJOR";
+        if (t.contains("20001"))                       return "ACCIDENT_MAJOR";
         if (t.contains("SIG ALERT"))                   return "ACCIDENT_MAJOR";
 
         // Non-injury collision / hit-and-run
@@ -93,7 +100,15 @@ public class AlertMapper {
 
         switch (t) {
             case "POLICE":
-                return s.contains("HIDDEN") ? "POLICE_HIDDEN" : "POLICE_VISIBLE";
+                // Waze RT uses POLICE_HIDING for hidden police (speed traps) and
+                // POLICE_WITH_MOBILE_CAMERA for mobile speed cameras; the georss
+                // feed used POLICE_HIDDEN. Treat all covert enforcement as hidden.
+                return (s.contains("HIDDEN") || s.contains("HIDING") || s.contains("CAMERA"))
+                        ? "POLICE_HIDDEN" : "POLICE_VISIBLE";
+
+            case "CAMERA":
+                // Fixed/mobile speed & red-light cameras — flag for enforcement awareness.
+                return "POLICE_HIDDEN";
 
             case "ACCIDENT":
                 return s.contains("MAJOR") ? "ACCIDENT_MAJOR" : "ACCIDENT_MINOR";
