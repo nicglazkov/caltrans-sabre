@@ -179,8 +179,12 @@ public class SabreResponseBuilder {
         obj.put("heading_deg",   a.headingDeg);
         obj.put("street_name",   a.streetName != null ? a.streetName : JSONObject.NULL);
         obj.put("report_ts",     (int) a.reportTs);
-        obj.put("confirm_ts",    JSONObject.NULL);          // nullable Int
-        obj.put("confirm_count", 0);
+        // confirm_ts is a nullable Int (epoch seconds); present but null unless the
+        // alert has been crowd-confirmed and the timestamp fits in Int.
+        boolean confirmTsFits = a.confirmTs != null
+                && a.confirmTs >= 0 && a.confirmTs <= Integer.MAX_VALUE;
+        obj.put("confirm_ts",    confirmTsFits ? (int) (long) a.confirmTs : JSONObject.NULL);
+        obj.put("confirm_count", Math.max(0, a.confirmCount));
         return obj;
     }
 

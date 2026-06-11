@@ -61,6 +61,7 @@ public final class WazeProtocolSource {
 
     private WazeSession session;
     private final WazeAlertCache alertCache = new WazeAlertCache();
+    private final WazeConfirmTracker confirmTracker = new WazeConfirmTracker();
 
     private volatile long   cacheTimeMs = 0L;
     private volatile double cacheLat, cacheLon;
@@ -178,8 +179,11 @@ public final class WazeProtocolSource {
         String type = (wa.subtype != null && !wa.subtype.isEmpty()) ? wa.subtype : wa.type;
         if (type == null || type.isEmpty()) return null;
         String id = "alert-" + wa.id + "/" + wa.uuid;   // user_id is parsed from this
+        int confirmCount = wa.nThumbsUp != null ? wa.nThumbsUp : 0;
+        Long confirmTs = confirmTracker.confirmTsSeconds(wa.uuid, wa.nThumbsUp);
         return new SabreAlert(id, SabreResponseBuilder.SOURCE_WAZE, type,
-                wa.lat, wa.lon, wa.magvar, wa.street, wa.pubMillis / 1000L);
+                wa.lat, wa.lon, wa.magvar, wa.street, wa.pubMillis / 1000L,
+                confirmTs, confirmCount);
     }
 
     static String region(double lat, double lon) {
