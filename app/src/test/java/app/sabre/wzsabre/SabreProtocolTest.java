@@ -245,15 +245,76 @@ public class SabreProtocolTest {
     }
 
     @Test
-    public void isValidType_acceptsAllSabreTypes() {
-        String[] all = {"POLICE_VISIBLE", "POLICE_HIDDEN", "ACCIDENT_MAJOR", "ACCIDENT_MINOR",
+    public void isValidType_acceptsCanonicalAndWazeVocabulary() {
+        // Canonical SABRE types emitted by CHP/LCS.
+        String[] canonical = {"POLICE_VISIBLE", "POLICE_HIDDEN", "ACCIDENT_MAJOR", "ACCIDENT_MINOR",
                 "HAZARD_ON_ROAD_DEBRIS", "HAZARD_ON_ROAD_CONGESTION", "HAZARD_ON_ROAD_SLIPPERY",
                 "HAZARD_ON_ROAD_POT_HOLE", "HAZARD_WEATHER_FOG", "HAZARD_WEATHER_RAIN",
                 "HAZARD_WEATHER_SNOW", "HAZARD_WEATHER_WIND", "HAZARD_WEATHER_STORM",
                 "HAZARD_WEATHER_HAIL"};
-        for (String t : all) assertTrue(t, SabreResponseBuilder.isValidType(t));
-        assertFalse(SabreResponseBuilder.isValidType("POLICE"));
+        for (String t : canonical) assertTrue(t, SabreResponseBuilder.isValidType(t));
+        // Raw Waze type/subtype names now pass through (the official ships these to HR).
+        String[] waze = {"POLICE", "ACCIDENT", "HAZARD", "JAM", "SOS",
+                "POLICE_HIDING", "POLICE_WITH_MOBILE_CAMERA", "JAM_HEAVY_TRAFFIC",
+                "HAZARD_ON_SHOULDER_CAR_STOPPED", "HAZARD_ON_ROAD_CAR_STOPPED",
+                "SOS_MECHANICAL_PROBLEM", "DEFAULT_CAMERA"};
+        for (String t : waze) assertTrue(t, SabreResponseBuilder.isValidType(t));
+        // A garbage string or null is still rejected.
+        assertFalse(SabreResponseBuilder.isValidType("TOTALLY_BOGUS_TYPE"));
         assertFalse(SabreResponseBuilder.isValidType(null));
+    }
+
+    @Test
+    public void build_passesThroughWazeSubtypeStrings() throws Exception {
+        // A stopped-vehicle-on-shoulder alert (previously dropped/flattened) survives.
+        SabreAlert stopped = new SabreAlert("waze_alert-7/uuid", SabreResponseBuilder.SOURCE_WAZE,
+                "HAZARD_ON_SHOULDER_CAR_STOPPED", 38.0, -122.0, 90.0, "I-80", NOW_SECONDS);
+        JSONObject a = firstAlert(parseResponse(Collections.singletonList(stopped)));
+        assertEquals("HAZARD_ON_SHOULDER_CAR_STOPPED", a.getString("type"));
+    }
+
+    // ── confirm fields ────────────────────────────────────────────────────────
+
+    @Test
+    public void alert_confirmFieldsForWaze() throws Exception {
+        SabreAlert confirmed = new SabreAlert("waze_alert-5/uuid", SabreResponseBuilder.SOURCE_WAZE,
+                "POLICE_VISIBLE", 38.0, -122.0, 0.0, "US-101", NOW_SECONDS,
+                NOW_SECONDS, 4);
+        JSONObject a = firstAlert(parseResponse(Collections.singletonList(confirmed)));
+        assertEquals(4, a.getInt("confirm_count"));
+        assertFalse("confirm_ts must be present and non-null when set", a.isNull("confirm_ts"));
+        assertEquals((int) NOW_SECONDS, a.getInt("confirm_ts"));
+    }
+
+    @Test
+    public void alert_confirmTsNullWhenOutOfIntRange() throws Exception {
+        // A confirm_ts that doesn't fit in Int must be sent as null, not overflowed.
+        SabreAlert a = new SabreAlert("waze_alert-6/uuid", SabreResponseBuilder.SOURCE_WAZE,
+                "POLICE_VISIBLE", 38.0, -122.0, 0.0, null, NOW_SECONDS,
+                ((long) Integer.MAX_VALUE) + 100L, 2);
+        JSONObject obj = firstAlert(parseResponse(Collections.singletonList(a)));
+        assertTrue("oversized confirm_ts must be null", obj.isNull("confirm_ts"));
+        assertEquals(2, obj.getInt("confirm_count"));
+    }
+
+    // ── batching ──────────────────────────────────────────────────────────────
+
+    @Test
+    public void build_singleBatchDefaults() throws Exception {
+        JSONObject data = parseResponse(Collections.singletonList(chpAlert()))
+                .getJSONObject("response");
+        assertEquals(1, data.getInt("n_batches"));
+        assertEquals(0, data.getInt("batch_id"));
+    }
+
+    @Test
+    public void build_batchCarriesNBatchesAndBatchId() throws Exception {
+        JSONObject root = new JSONObject(SabreResponseBuilder.build(
+                "req-1", Collections.singletonList(chpAlert()), 3, 2));
+        JSONObject data = root.getJSONObject("response");
+        assertEquals(3, data.getInt("n_batches"));
+        assertEquals(2, data.getInt("batch_id"));
+        assertEquals(1, data.getJSONArray("alerts").length());
     }
 
     // ── nullable fields: must be present but may be null ─────────────────────
