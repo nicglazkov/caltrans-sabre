@@ -27,6 +27,16 @@ public class SabreResponseBuilder {
     public static final String SOURCE_WAZE = "waze";
     public static final String SOURCE_LCS  = "lcs";
 
+    /**
+     * heading_deg value for an alert with no known travel direction. The official
+     * wzsabre sends -720.0 when an alert's magvar is unknown; HR treats this
+     * out-of-range bearing as "directionless" and shows the alert regardless of
+     * which way the driver is travelling. Sending 0.0 instead would claim the alert
+     * faces due north, which can make HR direction-filter it away. CHP incidents
+     * and LCS closures never carry a direction, so they use this.
+     */
+    public static final double HEADING_UNKNOWN = -720.0;
+
     // USER_ID_REGEX matches Waze alert IDs of the form "alert-<digits>/..."
     private static final Pattern USER_ID_PATTERN = Pattern.compile("alert-(\\d*)/.*");
 

@@ -286,13 +286,14 @@ public class LcsSource {
         long reportTs = c.epoch1097 > 0 ? c.epoch1097 : c.startEpoch;
         String street = describe(c);
         out.add(new SabreAlert("lcs_" + c.index, SabreResponseBuilder.SOURCE_LCS,
-                "HAZARD_ON_ROAD_CONGESTION", c.beginLat, c.beginLon, 0.0, street, reportTs));
+                "HAZARD_ON_ROAD_CONGESTION", c.beginLat, c.beginLon,
+                SabreResponseBuilder.HEADING_UNKNOWN, street, reportTs));
         if (hasEndPoint(c)
                 && CHPSource.haversineMeters(c.beginLat, c.beginLon, c.endLat, c.endLon)
                         > END_PIN_MIN_METERS) {
             out.add(new SabreAlert("lcs_" + c.index + "_end", SabreResponseBuilder.SOURCE_LCS,
-                    "HAZARD_ON_ROAD_CONGESTION", c.endLat, c.endLon, 0.0,
-                    "End: " + street, reportTs));
+                    "HAZARD_ON_ROAD_CONGESTION", c.endLat, c.endLon,
+                    SabreResponseBuilder.HEADING_UNKNOWN, "End: " + street, reportTs));
         }
         return out;
     }
