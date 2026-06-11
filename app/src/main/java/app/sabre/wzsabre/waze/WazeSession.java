@@ -158,15 +158,33 @@ final class WazeSession {
         if (!sessionValid())     login(lon, lat);
     }
 
-    /** Full flow: ensure ready, handshake, then query the area around (lat,lon). */
-    List<WazeAlert> fetchArea(double lat, double lon, double radiusMeters) throws Exception {
+    /**
+     * Register (if no credentials) + log in (if no valid session) + run the
+     * SeeMe/SetMood/Location/MapDisplayed handshake. Call once before a run of
+     * {@link #queryBox} calls — mirrors the official, which handshakes per login,
+     * not per query.
+     */
+    void prepareForArea(double lat, double lon) throws Exception {
         ensureReady(lon, lat);
-        command(WazeRtCodec.handshakePayload(lon, lat));   // SeeMe / SetMood / Location / MapDisplayed
+        command(WazeRtCodec.handshakePayload(lon, lat));
+    }
 
+    /**
+     * One MapDisplayed query for a bbox {@code [lonMin, latMin, lonMax, latMax]};
+     * returns the raw batch so the caller can parse both added alerts and removed
+     * ids from it (the RT response carries both).
+     */
+    WazeProto.Batch queryBox(double[] bbox) throws Exception {
+        return command(WazeRtCodec.mapDisplayedCommand(bbox[0], bbox[1], bbox[2], bbox[3]));
+    }
+
+    /** Full flow for a single box: prepare + one query. Used by the debug selfTest. */
+    List<WazeAlert> fetchArea(double lat, double lon, double radiusMeters) throws Exception {
+        prepareForArea(lat, lon);
         double latDelta = radiusMeters / WazeConstants.M_PER_DEG_LAT;
         double lonDelta = radiusMeters / WazeConstants.mPerDegLon(lat);
-        WazeProto.Batch batch = command(WazeRtCodec.mapDisplayedCommand(
-                lon - lonDelta, lat - latDelta, lon + lonDelta, lat + latDelta));
+        WazeProto.Batch batch = queryBox(new double[]{
+                lon - lonDelta, lat - latDelta, lon + lonDelta, lat + latDelta});
         return WazeRtCodec.parseAlerts(batch);
     }
 }

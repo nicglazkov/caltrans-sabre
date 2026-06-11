@@ -131,6 +131,25 @@ final class WazeRtCodec {
 
     // ── Response parsing ─────────────────────────────────────────────────────
 
+    /**
+     * Extracts removed-alert uuids from a batch. The RT server signals a cleared
+     * alert with an {@code old_command} line of the form {@code "RmAlert,<uuid>"}
+     * (NOT a RemoveAlertAction message — verified in wzsabre 2.2
+     * WazeProto.parseRemovedAlertIds). Strip the prefix and trim to get the uuid.
+     */
+    static List<String> parseRemovedAlertIds(WazeProto.Batch batch) {
+        List<String> out = new ArrayList<>();
+        for (WazeProto.Element el : batch.getElementList()) {
+            String oc = el.getOldCommand();
+            if (oc == null) continue;
+            oc = oc.trim();
+            if (oc.startsWith("RmAlert,")) {
+                out.add(oc.substring("RmAlert,".length()).trim());
+            }
+        }
+        return out;
+    }
+
     static List<WazeAlert> parseAlerts(WazeProto.Batch batch) {
         List<WazeAlert> out = new ArrayList<>();
         for (WazeProto.Element el : batch.getElementList()) {
@@ -149,8 +168,8 @@ final class WazeRtCodec {
             double lon = lonRaw / 1_000_000.0;
             double lat = c.getLatTimes1000000() / 1_000_000.0;
 
-            String type    = info.getType().name();
-            String subtype = info.getSubType().name();
+            String type    = typeName(info.getType());
+            String subtype = subTypeName(info.getSubType());
             int    magvar  = info.getAzymuth();
 
             long reportTime = 0L;
@@ -171,5 +190,27 @@ final class WazeRtCodec {
                     lon, lat, magvar, pubMillis, thumbs, street, city));
         }
         return out;
+    }
+
+    /**
+     * Type-enum → wire name, matching the official's ALERT_TYPE_NAMES map: the
+     * generated enum constant name, except types not in that map (UNKNOWN_TYPE and
+     * the reserved __NOT_IN_USE__ values) collapse to "UNKNOWN".
+     */
+    private static String typeName(WazeProto.AlertType t) {
+        String n = t.name();
+        if (n.equals("UNKNOWN_TYPE") || n.startsWith("__NOT_IN_USE")) return "UNKNOWN";
+        return n;
+    }
+
+    /**
+     * Subtype-enum → wire name, matching the official's ALERT_SUBTYPE_NAMES map:
+     * the enum constant name, except NO_SUBTYPE and the reserved __NOT_IN_USE__
+     * values map to "" so the caller falls back to the type name.
+     */
+    private static String subTypeName(WazeProto.AlertSubType s) {
+        String n = s.name();
+        if (n.equals("NO_SUBTYPE") || n.startsWith("__NOT_IN_USE")) return "";
+        return n;
     }
 }

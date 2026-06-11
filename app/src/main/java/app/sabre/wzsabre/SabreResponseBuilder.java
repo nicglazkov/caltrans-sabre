@@ -27,22 +27,77 @@ public class SabreResponseBuilder {
     public static final String SOURCE_WAZE = "waze";
     public static final String SOURCE_LCS  = "lcs";
 
+    /**
+     * heading_deg value for an alert with no known travel direction. The official
+     * wzsabre sends -720.0 when an alert's magvar is unknown; HR treats this
+     * out-of-range bearing as "directionless" and shows the alert regardless of
+     * which way the driver is travelling. Sending 0.0 instead would claim the alert
+     * faces due north, which can make HR direction-filter it away. CHP incidents
+     * and LCS closures never carry a direction, so they use this.
+     */
+    public static final double HEADING_UNKNOWN = -720.0;
+
+    /** Max alerts per response batch — matches the official wzsabre (200). */
+    public static final int MAX_ALERTS_PER_BATCH = 200;
+
     // USER_ID_REGEX matches Waze alert IDs of the form "alert-<digits>/..."
     private static final Pattern USER_ID_PATTERN = Pattern.compile("alert-(\\d*)/.*");
 
     /**
-     * Every alert type HR's SabreFetchResponseAlert deserializer accepts. An alert
-     * with any other type string would crash HR's renderer, so unknown types are
-     * dropped in {@link #build} rather than sent.
+     * Alert type strings HR's renderer accepts. This is the union of (a) the
+     * canonical SABRE types our CHP/LCS sources emit and (b) the full Waze alert
+     * type + subtype vocabulary, which the official wzsabre passes through raw to
+     * the same HR app — so HR is known to handle every string here. An alert whose
+     * type is outside this set can only be a bug in our own mapping, so {@link
+     * #build} drops it rather than risk HR's renderer on an unexpected string.
+     *
+     * <p>The Waze entries are the exact enum names the official's ALERT_TYPE_NAMES /
+     * ALERT_SUBTYPE_NAMES maps produce (see WazeRtCodec.typeName/subTypeName).
      */
     private static final java.util.Set<String> VALID_TYPES = new java.util.HashSet<>(
             java.util.Arrays.asList(
+                    // ── canonical SABRE types emitted by the CHP and LCS sources ──
                     "POLICE_VISIBLE", "POLICE_HIDDEN",
                     "ACCIDENT_MAJOR", "ACCIDENT_MINOR",
                     "HAZARD_ON_ROAD_DEBRIS", "HAZARD_ON_ROAD_CONGESTION",
                     "HAZARD_ON_ROAD_SLIPPERY", "HAZARD_ON_ROAD_POT_HOLE",
                     "HAZARD_WEATHER_FOG", "HAZARD_WEATHER_RAIN", "HAZARD_WEATHER_SNOW",
-                    "HAZARD_WEATHER_WIND", "HAZARD_WEATHER_STORM", "HAZARD_WEATHER_HAIL"));
+                    "HAZARD_WEATHER_WIND", "HAZARD_WEATHER_STORM", "HAZARD_WEATHER_HAIL",
+                    // ── Waze alert type names (subtype empty → type passed through) ──
+                    "CHIT_CHAT", "POLICE", "ACCIDENT", "JAM", "TRAFFIC_INFO", "HAZARD",
+                    "MISC", "CONSTRUCTION", "PARKING", "DYNAMIC", "CAMERA",
+                    "ROAD_CLOSED", "SYSTEM_ROAD_CLOSED", "UNKNOWN_ALERT", "SOS",
+                    "CRASH_PRONE", "TURN_CLOSED", "NEW_BAD_WEATHER", "NEW_LANE_CLOSED",
+                    "PERMANENT_HAZARD", "PERSONAL_SAFETY", "UNKNOWN",
+                    // ── Waze alert subtype names ──
+                    "POLICE_HIDING", "POLICE_WITH_MOBILE_CAMERA",
+                    "JAM_MODERATE_TRAFFIC", "JAM_HEAVY_TRAFFIC",
+                    "JAM_STAND_STILL_TRAFFIC", "JAM_LIGHT_TRAFFIC",
+                    "HAZARD_ON_ROAD", "HAZARD_ON_SHOULDER", "HAZARD_WEATHER",
+                    "HAZARD_ON_ROAD_OBJECT", "HAZARD_ON_ROAD_ROAD_KILL",
+                    "HAZARD_ON_SHOULDER_CAR_STOPPED", "HAZARD_ON_SHOULDER_ANIMALS",
+                    "HAZARD_ON_SHOULDER_MISSING_SIGN",
+                    "HAZARD_WEATHER_HEAVY_RAIN", "HAZARD_WEATHER_HEAVY_SNOW",
+                    "HAZARD_WEATHER_FLOOD", "HAZARD_WEATHER_MONSOON",
+                    "HAZARD_WEATHER_TORNADO", "HAZARD_WEATHER_HEAT_WAVE",
+                    "HAZARD_WEATHER_HURRICANE", "HAZARD_WEATHER_FREEZING_RAIN",
+                    "HAZARD_ON_ROAD_LANE_CLOSED", "HAZARD_ON_ROAD_OIL",
+                    "HAZARD_ON_ROAD_ICE", "HAZARD_ON_ROAD_CONSTRUCTION",
+                    "HAZARD_ON_ROAD_CAR_STOPPED", "HAZARD_ON_ROAD_TRAFFIC_LIGHT_FAULT",
+                    "HAZARD_ON_ROAD_EMERGENCY_VEHICLE",
+                    "ROAD_CLOSED_HAZARD", "ROAD_CLOSED_CONSTRUCTION", "ROAD_CLOSED_EVENT",
+                    "SOS_FLAT_TIRE", "SOS_NO_FUEL", "SOS_MEDICAL_HELP",
+                    "SOS_MECHANICAL_PROBLEM", "SOS_OTHER", "SOS_BATTERY_ISSUE",
+                    "CRASH_PRONE_SHORT_ALERT_LENGTH", "CRASH_PRONE_LONG_ALERT_LENGTH",
+                    "TURN_CLOSED_EVENT", "BAD_WEATHER_DEFAULT", "BAD_WEATHER_SLIPPERY_ROAD",
+                    "LANE_CLOSURE_BLOCKED_LANES", "LANE_CLOSURE_LEFT_LANE",
+                    "LANE_CLOSURE_RIGHT_LANE", "LANE_CLOSURE_CENTER_LANE",
+                    "PERMANENT_HAZARD_SPEED_BUMP", "PERMANENT_HAZARD_TOPES",
+                    "PERMANENT_HAZARD_TOLL_BOOTH", "PERMANENT_HAZARD_DANGEROUS_CURVE",
+                    "PERMANENT_HAZARD_DANGEROUS_INTERSECTION",
+                    "PERMANENT_HAZARD_DANGEROUS_SPLIT", "PERMANENT_HAZARD_DANGEROUS_MERGE",
+                    "PERMANENT_HAZARD_SCHOOL_ZONE",
+                    "DEFAULT_PERSONAL_SAFETY", "DEFAULT_CAMERA"));
 
     public static boolean isValidType(String type) {
         return type != null && VALID_TYPES.contains(type);
@@ -79,13 +134,26 @@ public class SabreResponseBuilder {
      * </pre>
      */
     public static String build(String requestId, List<SabreAlert> alerts) throws JSONException {
+        return build(requestId, alerts, 1, 0);
+    }
+
+    /**
+     * Build one batch of a multi-batch response. HR's wire format carries
+     * {@code n_batches} (total) and {@code batch_id} (0-based); the official
+     * wzsabre splits a fetch response into batches of {@value #MAX_ALERTS_PER_BATCH}
+     * alerts, each sent as a separate broadcast. {@code batchAlerts} is the slice
+     * for this batch.
+     */
+    public static String build(String requestId, List<SabreAlert> batchAlerts,
+                               int nBatches, int batchId) throws JSONException {
         JSONObject root = new JSONObject();
         root.put("request_id",    requestId);
         root.put("error_message", JSONObject.NULL);
 
         JSONObject responseData = new JSONObject();
-        responseData.put("n_batches", 1);
-        responseData.put("batch_id",  0);
+        responseData.put("n_batches", nBatches);
+        responseData.put("batch_id",  batchId);
+        List<SabreAlert> alerts = batchAlerts;
 
         // One malformed alert must never take down the whole response (HR would
         // get nothing and show "plugin not responding") — drop it and keep the rest.
@@ -127,8 +195,12 @@ public class SabreResponseBuilder {
         obj.put("heading_deg",   a.headingDeg);
         obj.put("street_name",   a.streetName != null ? a.streetName : JSONObject.NULL);
         obj.put("report_ts",     (int) a.reportTs);
-        obj.put("confirm_ts",    JSONObject.NULL);          // nullable Int
-        obj.put("confirm_count", 0);
+        // confirm_ts is a nullable Int (epoch seconds); present but null unless the
+        // alert has been crowd-confirmed and the timestamp fits in Int.
+        boolean confirmTsFits = a.confirmTs != null
+                && a.confirmTs >= 0 && a.confirmTs <= Integer.MAX_VALUE;
+        obj.put("confirm_ts",    confirmTsFits ? (int) (long) a.confirmTs : JSONObject.NULL);
+        obj.put("confirm_count", Math.max(0, a.confirmCount));
         return obj;
     }
 

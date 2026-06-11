@@ -184,7 +184,7 @@ public class CHPSource {
         return new SabreAlert(
                 "chp_" + logId,
                 SabreResponseBuilder.SOURCE_CHP,
-                finalType, lat, lon, 0.0, streetName, reportTs);
+                finalType, lat, lon, SabreResponseBuilder.HEADING_UNKNOWN, streetName, reportTs);
     }
 
     // ── Time parsing ──────────────────────────────────────────────────────────

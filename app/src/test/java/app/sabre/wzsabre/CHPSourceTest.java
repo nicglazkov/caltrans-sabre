@@ -136,6 +136,14 @@ public class CHPSourceTest {
     }
 
     @Test
+    public void alert_headingIsDirectionlessSentinel() throws Exception {
+        // CHP incidents have no travel direction; they must use the -720 sentinel
+        // so HR shows them regardless of which way the driver is heading.
+        List<SabreAlert> alerts = callParseXml(new CHPSource(), XML_ONE_INCIDENT);
+        assertEquals(SabreResponseBuilder.HEADING_UNKNOWN, alerts.get(0).headingDeg, 0.0);
+    }
+
+    @Test
     public void parseLatLon_sfCoords() {
         double[] coords = CHPSource.parseLatLon("37774567:122419400");
         assertEquals(37.774567, coords[0], 0.0001);

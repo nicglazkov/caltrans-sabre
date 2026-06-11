@@ -35,6 +35,13 @@ public class SabreService extends Service {
     private LcsSource lcsSource;
     private app.sabre.wzsabre.waze.WazeProtocolSource wazeSource;
 
+    // Last fetch location, persisted so the Waze session can be pre-warmed at the
+    // next service start (HR's handshake starts the service before its first
+    // FETCH_REQUEST). Without this, a cold start has to register/login/query Waze
+    // while HR is already waiting, so police alerts took 10-15s to appear vs the
+    // official's <2s. See WazeProtocolSource.prewarm.
+    private static final String STATE_PREFS = "sabre_state";
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -45,7 +52,29 @@ public class SabreService extends Service {
         wazeSource = new app.sabre.wzsabre.waze.WazeProtocolSource(this);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildForegroundNotification());
+        prewarmFromLastLocation();
         Log.d(TAG, "Service started");
+    }
+
+    /** Kick off a Waze refresh for the last known location so the cache is warm
+     *  by the time HR sends its first FETCH_REQUEST after a (re)start. */
+    private void prewarmFromLastLocation() {
+        android.content.SharedPreferences p = getSharedPreferences(STATE_PREFS, MODE_PRIVATE);
+        if (!p.contains("last_lat")) return;
+        double lat = Double.longBitsToDouble(p.getLong("last_lat", 0));
+        double lon = Double.longBitsToDouble(p.getLong("last_lon", 0));
+        double radius = Double.longBitsToDouble(p.getLong("last_radius", 0));
+        if (radius <= 0) radius = 80_000;
+        Log.d(TAG, String.format("Pre-warming Waze for last location %.4f,%.4f", lat, lon));
+        wazeSource.prewarm(lat, lon, radius);
+    }
+
+    private void saveLastLocation(double lat, double lon, double radius) {
+        getSharedPreferences(STATE_PREFS, MODE_PRIVATE).edit()
+                .putLong("last_lat", Double.doubleToRawLongBits(lat))
+                .putLong("last_lon", Double.doubleToRawLongBits(lon))
+                .putLong("last_radius", Double.doubleToRawLongBits(radius))
+                .apply();
     }
 
     @Override
@@ -86,6 +115,7 @@ public class SabreService extends Service {
                 double radius = req.has("radius_m") ? req.getDouble("radius_m") : req.getDouble("radius");
 
                 Log.d(TAG, String.format("Fetch: lat=%.4f lon=%.4f radius=%.0fm", lat, lon, radius));
+                saveLastLocation(lat, lon, radius);
 
                 long deadline = System.currentTimeMillis() + RESPONSE_BUDGET_MS;
 
@@ -208,12 +238,23 @@ public class SabreService extends Service {
 
     private void sendFetchResponse(String responseAction, String requestId,
                                     List<SabreAlert> alerts) throws JSONException {
-        String responseJson = SabreResponseBuilder.build(requestId, alerts);
-        Intent intent = new Intent(responseAction);
-        intent.putExtra("data", responseJson);
-        sendBroadcast(intent);
-        Log.d(TAG, "Response sent to: " + responseAction);
-        Log.d(TAG, "Response JSON: " + responseJson);
+        // Split into batches of MAX_ALERTS_PER_BATCH, each its own broadcast, with
+        // n_batches/batch_id set — mirrors the official wzsabre. Always ≥1 batch
+        // (an empty list still sends one empty batch so HR sees a response).
+        int n = alerts.size();
+        int batchSize = SabreResponseBuilder.MAX_ALERTS_PER_BATCH;
+        int nBatches = Math.max(1, (n + batchSize - 1) / batchSize);
+        for (int i = 0; i < nBatches; i++) {
+            int from = i * batchSize;
+            int to = Math.min(n, from + batchSize);
+            String responseJson = SabreResponseBuilder.build(
+                    requestId, alerts.subList(from, to), nBatches, i);
+            Intent intent = new Intent(responseAction);
+            intent.putExtra("data", responseJson);
+            sendBroadcast(intent);
+            Log.d(TAG, "Response batch " + (i + 1) + "/" + nBatches + " sent to: " + responseAction);
+            Log.d(TAG, "Response JSON: " + responseJson);
+        }
     }
 
     private void createNotificationChannel() {

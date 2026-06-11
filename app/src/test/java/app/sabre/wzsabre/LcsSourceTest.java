@@ -213,6 +213,8 @@ public class LcsSourceTest {
         assertEquals(37.329044, a.lat, 1e-6);
         assertTrue("report_ts should be the 1097 epoch", a.reportTs > 0);
         assertTrue(a.reportTs <= Integer.MAX_VALUE);
+        assertEquals("closures are directionless → -720 heading sentinel",
+                SabreResponseBuilder.HEADING_UNKNOWN, a.headingDeg, 0.0);
     }
 
     @Test
