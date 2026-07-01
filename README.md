@@ -20,7 +20,7 @@ All sources run in parallel and feed into the standard HR crowdsourced-alerts la
 
 ## Requirements
 
-- Android **6.0+** (API 23)
+- Android **7.0+** (API 24)
 - [Highway Radar](https://play.google.com/store/apps/details?id=com.highwayradar.app) installed
 - Sideloading enabled on your device
 
@@ -30,13 +30,15 @@ All sources run in parallel and feed into the standard HR crowdsourced-alerts la
 
 ### Option A — Download the APK (recommended for most users)
 
-1. Go to the [Releases](../../releases) page and download the latest `app-release.apk`.
-2. On your Android device, open **Settings → Security** (or *Install unknown apps*) and allow installs from your browser or file manager.
+1. Go to the [Releases](../../releases) page and download the latest APK.
+2. On your Android device, open **Settings → Security** (or *Install unknown apps*) and allow installs from your browser or file manager. If Google Play Protect warns that the app is unrecognized, tap **More details → Install anyway**.
 3. Open the downloaded APK and tap **Install**.
-4. Open the **CHP + Waze SABRE** app once — this wakes up the background service.
+4. Open the **CHP + Waze SABRE** app once. On first launch, **allow notifications** and **allow the battery-optimization exemption** when prompted — without these the background service can be frozen and alerts stop.
 5. Open **Highway Radar → Settings → SABRE** and select **CHP + Waze SABRE**.
 
-> **After a phone reboot:** Open the CHP + Waze SABRE app once before using Highway Radar, or simply tap the green start button in HR — the plugin will start automatically.
+> **Why the persistent notification?** Android requires a foreground-service notification while the plugin is feeding alerts. The plugin only runs while Highway Radar is open and stops itself shortly after you close HR, so it isn't running (or notifying) in the background the rest of the time.
+
+> **After a phone reboot:** Just open Highway Radar — the plugin starts automatically when HR sends its first request.
 
 ### Option B — Build from source
 
@@ -139,7 +141,7 @@ Pull requests welcome. Run the test suite before submitting:
 ./gradlew test
 ```
 
-184 unit tests cover the SABRE response format, alert type mapping, the Waze alert cache (delta merge + soft-delete), shrinking-box geometry, crowd-confirmation tracking, CHP XML parsing, Caltrans LCS parsing and filtering, config filtering, and LogTime parsing. See [BUILDING.md](BUILDING.md) for full dev setup.
+195 unit tests cover the SABRE response format, alert type mapping, the Waze alert cache (delta merge + soft-delete), in-band Waze error classification, shrinking-box geometry, crowd-confirmation tracking, CHP XML parsing, Caltrans LCS parsing and filtering, config filtering, and LogTime parsing. See [BUILDING.md](BUILDING.md) for full dev setup.
 
 ---
 

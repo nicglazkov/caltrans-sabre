@@ -6,9 +6,9 @@
 |------|---------|
 | Android Studio | Ladybug (2024.2) or newer |
 | Android SDK | API 35 |
-| JDK | 11 (bundled with Android Studio) |
+| JDK | **17+** to run Gradle/AGP (the JBR bundled with Android Studio works). The app code itself targets Java 11. |
 
-No NDK or additional toolchains needed.
+No NDK or additional toolchains needed. The Waze protobuf classes are generated automatically on first build from `app/src/main/proto/waze.proto` — no manual protoc step. Debug builds need no keystore; only `assembleRelease` requires a `keystore.properties` at the repo root.
 
 ## Clone and build
 
