@@ -20,7 +20,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 public class SabreService extends Service {
     private static final String TAG = "SABREService";
@@ -74,8 +73,9 @@ public class SabreService extends Service {
         wazeSource = new app.sabre.wzsabre.waze.WazeProtocolSource(this);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildForegroundNotification());
-        prewarmFromLastLocation();
-        armIdleStop();   // stop if no HR activity arrives
+        chpSource.prewarm();          // statewide feed — no location needed
+        prewarmFromLastLocation();    // Waze — needs last known location
+        armIdleStop();                // stop if no HR activity arrives
         Log.d(TAG, "Service started");
     }
 
@@ -158,6 +158,7 @@ public class SabreService extends Service {
         if (fetchExecutor   != null) fetchExecutor.shutdownNow();
         if (wazeSource != null) wazeSource.shutdown();
         if (lcsSource  != null) lcsSource.shutdown();
+        if (chpSource  != null) chpSource.shutdown();
         super.onDestroy();
     }
 
@@ -186,8 +187,8 @@ public class SabreService extends Service {
                 // Load config fresh on each request so changes take effect immediately
                 ChpConfig chpConfig = ChpConfig.load(SabreService.this);
 
-                // All sources run in parallel. Waze and LCS serve from caches and
-                // return in milliseconds; CHP is the only real network call here.
+                // All three sources serve from background-refreshed caches and return
+                // in milliseconds; none blocks on the network on the HR request path.
                 Future<List<SabreAlert>> chpFuture  = fetchExecutor.submit(() -> chpSource.fetchAlerts(lat, lon, radius, chpConfig));
                 Future<List<SabreAlert>> wazeFuture = fetchExecutor.submit(() -> wazeSource.fetchAlerts(lat, lon, radius));
                 Future<List<SabreAlert>> lcsFuture  = chpConfig.lcsEnabled
@@ -196,12 +197,15 @@ public class SabreService extends Service {
 
                 List<SabreAlert> allAlerts = new ArrayList<>();
 
-                // CHP is always fast (~0.5 s); give it up to 5 s just in case
+                // Each source serves from cache and returns in ms. Any failure of one
+                // source (timeout OR an unexpected error) must never discard the
+                // alerts already collected from the others, so each get() is guarded
+                // independently and only that source is dropped on failure.
                 try {
                     allAlerts.addAll(chpFuture.get(5, TimeUnit.SECONDS));
                     Log.d(TAG, "CHP: " + allAlerts.size() + " alerts");
-                } catch (TimeoutException e) {
-                    Log.w(TAG, "CHP timed out");
+                } catch (Exception e) {
+                    Log.w(TAG, "CHP unavailable this cycle: " + e.getClass().getSimpleName());
                     chpFuture.cancel(true);
                 }
 
@@ -212,8 +216,8 @@ public class SabreService extends Service {
                         List<SabreAlert> wazeAlerts = wazeFuture.get(wazeMs, TimeUnit.MILLISECONDS);
                         allAlerts.addAll(wazeAlerts);
                         Log.d(TAG, "Waze: " + wazeAlerts.size() + " alerts");
-                    } catch (TimeoutException e) {
-                        Log.w(TAG, "Waze exceeded budget — sending without Waze data");
+                    } catch (Exception e) {
+                        Log.w(TAG, "Waze unavailable this cycle: " + e.getClass().getSimpleName());
                         wazeFuture.cancel(true);
                     }
                 } else {
@@ -227,8 +231,8 @@ public class SabreService extends Service {
                         List<SabreAlert> lcsAlerts = lcsFuture.get(1, TimeUnit.SECONDS);
                         allAlerts.addAll(lcsAlerts);
                         Log.d(TAG, "LCS: " + lcsAlerts.size() + " alerts");
-                    } catch (TimeoutException e) {
-                        Log.w(TAG, "LCS timed out");
+                    } catch (Exception e) {
+                        Log.w(TAG, "LCS unavailable this cycle: " + e.getClass().getSimpleName());
                         lcsFuture.cancel(true);
                     }
                 }

@@ -1,6 +1,5 @@
 package app.sabre.wzsabre;
 
-import android.net.Network;
 import android.util.Log;
 
 import org.xmlpull.v1.XmlPullParser;
@@ -16,31 +15,69 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.TimeZone;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.HttpsURLConnection;
 
 /**
  * Fetches and parses the CHP statewide live incident XML feed.
  * Filters by radius, incident age, and the per-category settings in ChpConfig.
+ *
+ * <p>Like the Waze and LCS sources, CHP is served from a background-refreshed cache
+ * and NEVER fetched on the Highway Radar request path. Earlier this was a blocking
+ * network call: a slow/hung CHP fetch (the feed sits behind a flaky load balancer)
+ * could occupy the shared fetch thread pool and starve Waze/LCS, and any single
+ * failure returned zero CHP alerts for that cycle — so incidents flapped in and out
+ * while driving through cell dead zones. Now {@link #fetchAlerts} returns the last
+ * good parse instantly and a stale fetch only affects freshness, never availability.
  */
 public class CHPSource {
     private static final String TAG     = "CHPSource";
     private static final String CHP_URL = "https://media.chp.ca.gov/sa_xml/sa.xml";
-    private static final int TIMEOUT_MS = 12_000;
+    // Background thread, so the timeouts don't gate the HR response — but still bounded
+    // so a hung fetch can't pin the refresh thread indefinitely.
+    private static final int CONNECT_TIMEOUT_MS = 8_000;
+    private static final int READ_TIMEOUT_MS    = 8_000;
+
+    private static final long CACHE_TTL_MS       = 60_000L;       // CHP updates ~1/min
+    private static final long CACHE_MAX_SERVE_MS = 10 * 60_000L;  // never serve staler than this
 
     // CHP times are Pacific; parse in that zone so age comparisons are correct
     private static final TimeZone TZ_PACIFIC = TimeZone.getTimeZone("America/Los_Angeles");
 
+    // ── Parsed statewide incident (pre-radius, pre-config) ────────────────────
+
+    static final class Incident {
+        final String logId, logType, logTime, location, area;
+        final double lat, lon;
+        Incident(String logId, String logType, String logTime, String location, String area,
+                 double lat, double lon) {
+            this.logId = logId; this.logType = logType; this.logTime = logTime;
+            this.location = location; this.area = area; this.lat = lat; this.lon = lon;
+        }
+    }
+
+    private final ExecutorService refreshExec = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean refreshing = new AtomicBoolean(false);
+    private volatile List<Incident> cache = null;
+    private volatile long cacheTimeMs = 0L;
+    // Conditional-GET validators so an unchanged feed isn't re-downloaded (~300KB).
+    private volatile String etag = null;
+    private volatile String lastModified = null;
+
+    /**
+     * Returns CHP incidents within the radius from the cache, filtered by config.
+     * Never blocks on the network; a stale/first cache triggers a background refresh.
+     */
     public List<SabreAlert> fetchAlerts(double centerLat, double centerLon,
                                          double radiusMeters, ChpConfig config) {
-        List<SabreAlert> results = new ArrayList<>();
-        try {
-            String xml = fetchXml(null);
-            results = parseXml(xml, centerLat, centerLon, radiusMeters, config);
-            Log.d(TAG, "CHP: " + results.size() + " alerts within radius");
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to fetch CHP data: " + e.getMessage());
+        triggerRefreshIfStale();
+        List<Incident> snap = cache;
+        if (snap == null || (System.currentTimeMillis() - cacheTimeMs) > CACHE_MAX_SERVE_MS) {
+            return new ArrayList<>();
         }
-        return results;
+        return filter(snap, centerLat, centerLon, radiusMeters, config);
     }
 
     /** Overload kept for tests that don't use config (passes null → all defaults). */
@@ -49,29 +86,72 @@ public class CHPSource {
         return fetchAlerts(centerLat, centerLon, radiusMeters, null);
     }
 
-    private String fetchXml(Network network) throws Exception {
+    /** Warm the cache at service start so HR's first request isn't empty. */
+    public void prewarm() {
+        triggerRefreshIfStale();
+    }
+
+    /** Release the background refresh thread when the owning service is destroyed. */
+    public void shutdown() {
+        refreshExec.shutdownNow();
+    }
+
+    private void triggerRefreshIfStale() {
+        boolean stale = cache == null || (System.currentTimeMillis() - cacheTimeMs) > CACHE_TTL_MS;
+        if (stale && refreshing.compareAndSet(false, true)) {
+            refreshExec.submit(() -> {
+                try {
+                    List<Incident> parsed = fetchAndParse();
+                    if (parsed != null) {   // null = 304 Not Modified → keep last good
+                        cache = parsed;
+                        cacheTimeMs = System.currentTimeMillis();
+                        Log.d(TAG, "CHP refreshed: " + parsed.size() + " statewide incidents");
+                    } else {
+                        cacheTimeMs = System.currentTimeMillis();   // fresh enough, unchanged
+                    }
+                } catch (Exception e) {
+                    // Keep serving the last good parse — a transient failure must not
+                    // blank CHP for the whole cycle.
+                    Log.w(TAG, "CHP refresh failed (serving cache): "
+                            + e.getClass().getSimpleName() + ": " + e.getMessage());
+                } finally {
+                    refreshing.set(false);
+                }
+            });
+        }
+    }
+
+    /** @return parsed incidents, or {@code null} when the server replies 304 Not Modified. */
+    private List<Incident> fetchAndParse() throws Exception {
         URL url = new URL(CHP_URL);
-        HttpsURLConnection conn = network != null
-                ? (HttpsURLConnection) network.openConnection(url)
-                : (HttpsURLConnection) url.openConnection();
-        conn.setConnectTimeout(TIMEOUT_MS);
-        conn.setReadTimeout(TIMEOUT_MS);
+        HttpsURLConnection conn = (HttpsURLConnection) url.openConnection();
+        conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
+        conn.setReadTimeout(READ_TIMEOUT_MS);
         conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14)");
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+        if (etag != null)         conn.setRequestProperty("If-None-Match", etag);
+        if (lastModified != null) conn.setRequestProperty("If-Modified-Since", lastModified);
+        try {
+            if (conn.getResponseCode() == HttpsURLConnection.HTTP_NOT_MODIFIED) return null;
+            etag         = conn.getHeaderField("ETag");
+            lastModified = conn.getHeaderField("Last-Modified");
             StringBuilder sb = new StringBuilder();
-            char[] buf = new char[4096];
-            int n;
-            while ((n = reader.read(buf)) != -1) sb.append(buf, 0, n);
-            return sb.toString();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                char[] buf = new char[4096];
+                int n;
+                while ((n = reader.read(buf)) != -1) sb.append(buf, 0, n);
+            }
+            return parseAll(sb.toString());
         } finally {
             conn.disconnect();
         }
     }
 
-    List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
-                               double radiusMeters, ChpConfig config) throws Exception {
-        List<SabreAlert> alerts = new ArrayList<>();
+    // ── Parsing ───────────────────────────────────────────────────────────────
+
+    /** Parse every complete statewide incident with valid coordinates (no filtering). */
+    static List<Incident> parseAll(String xml) throws Exception {
+        List<Incident> incidents = new ArrayList<>();
         XmlPullParserFactory factory = XmlPullParserFactory.newInstance();
         XmlPullParser parser = factory.newPullParser();
         parser.setInput(new StringReader(xml));
@@ -114,11 +194,8 @@ public class CHPSource {
                         else if ("LATLON".equals(endTag))   latlon    = value;
                     }
                     if ("Log".equals(endTag)) {
-                        if (logId != null && latlon != null) {
-                            SabreAlert alert = buildAlert(logId, logType, logTime, location, area,
-                                    latlon, centerLat, centerLon, radiusMeters, config);
-                            if (alert != null) alerts.add(alert);
-                        }
+                        Incident inc = toIncident(logId, logType, logTime, location, area, latlon);
+                        if (inc != null) incidents.add(inc);
                         currentTag = null;
                     }
                     break;
@@ -126,65 +203,84 @@ public class CHPSource {
             try {
                 eventType = parser.next();
             } catch (Exception e) {
-                // CHP's IIS server caps the feed at ~80KB (Content-Length: 81920) and
-                // truncates mid-record when statewide incident volume is high, leaving
-                // malformed XML at the end. Salvage every complete <Log> parsed so far
-                // instead of dropping all of them (which would yield zero alerts exactly
-                // when the roads are busiest).
-                Log.w(TAG, "CHP feed truncated mid-stream — salvaged " + alerts.size()
+                // CHP's IIS server caps the feed (~80KB historically, but the size now
+                // varies) and truncates mid-record when statewide incident volume is
+                // high, leaving malformed XML at the end. Salvage every complete <Log>
+                // parsed so far instead of dropping all of them (which would yield zero
+                // alerts exactly when the roads are busiest).
+                Log.w(TAG, "CHP feed truncated mid-stream — salvaged " + incidents.size()
                         + " complete records before the cut");
                 break;
             }
         }
-        return alerts;
+        return incidents;
     }
 
-    /** Kept for tests that call the old 4-arg overload. */
-    List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
-                               double radiusMeters) throws Exception {
-        return parseXml(xml, centerLat, centerLon, radiusMeters, null);
-    }
-
-    private SabreAlert buildAlert(String logId, String logType, String logTime,
-                                   String location, String area, String latlon,
-                                   double centerLat, double centerLon, double radiusMeters,
-                                   ChpConfig config) {
-        // ── coordinate validation ───────────────────────────────────────────
-        if (latlon == null || latlon.equals("0:0") || latlon.startsWith("0:")) return null;
+    /** Build an Incident from raw fields, or null if coordinates are missing/invalid. */
+    private static Incident toIncident(String logId, String logType, String logTime,
+                                       String location, String area, String latlon) {
+        if (logId == null || latlon == null) return null;
+        if (latlon.equals("0:0") || latlon.startsWith("0:")) return null;
         double[] coords;
         try { coords = parseLatLon(latlon); } catch (Exception e) { return null; }
-        double lat = coords[0], lon = coords[1];
-        if (lat == 0.0 && lon == 0.0) return null;
-        if (haversineMeters(centerLat, centerLon, lat, lon) > radiusMeters) return null;
+        if (coords[0] == 0.0 && coords[1] == 0.0) return null;
+        return new Incident(logId, logType, logTime, location, area, coords[0], coords[1]);
+    }
+
+    // ── Filtering (radius + config) ───────────────────────────────────────────
+
+    private static List<SabreAlert> filter(List<Incident> incidents, double centerLat,
+                                            double centerLon, double radiusMeters, ChpConfig config) {
+        List<SabreAlert> out = new ArrayList<>();
+        long nowSec = System.currentTimeMillis() / 1000;
+        for (Incident inc : incidents) {
+            SabreAlert a = buildAlert(inc, centerLat, centerLon, radiusMeters, config, nowSec);
+            if (a != null) out.add(a);
+        }
+        return out;
+    }
+
+    private static SabreAlert buildAlert(Incident inc, double centerLat, double centerLon,
+                                         double radiusMeters, ChpConfig config, long nowSec) {
+        if (haversineMeters(centerLat, centerLon, inc.lat, inc.lon) > radiusMeters) return null;
 
         // ── always-excluded types (admin, not traffic-relevant) ──────────────
-        ChpCategory category = AlertMapper.categoryFor(logType);
+        ChpCategory category = AlertMapper.categoryFor(inc.logType);
         if (category == null) return null;  // SILVER / MISSING
 
         // ── incident age filter ──────────────────────────────────────────────
-        long reportTs = parseLogTime(logTime);  // 0 if unparseable
-        if (reportTs == 0) reportTs = System.currentTimeMillis() / 1000;
+        long reportTs = parseLogTime(inc.logTime);   // 0 if unparseable
+        if (reportTs == 0) reportTs = nowSec;
 
         if (config != null && config.maxAgeMinutes > 0) {
-            long cutoffSecs = System.currentTimeMillis() / 1000 - config.maxAgeMinutes * 60L;
-            if (reportTs > 0 && reportTs < cutoffSecs) return null;  // too old
+            long cutoffSecs = nowSec - config.maxAgeMinutes * 60L;
+            if (reportTs < cutoffSecs) return null;  // too old
         }
 
         // ── category filter + type resolution ────────────────────────────────
-        String naturalType = AlertMapper.fromChpLogType(logType);
-        String finalType;
-        if (config != null) {
-            finalType = config.resolveType(category, naturalType);
-        } else {
-            finalType = (category.defaultType != null) ? category.defaultType : naturalType;
-        }
+        String naturalType = AlertMapper.fromChpLogType(inc.logType);
+        String finalType = (config != null)
+                ? config.resolveType(category, naturalType)
+                : (category.defaultType != null ? category.defaultType : naturalType);
         if (finalType == null) return null;  // category disabled
 
-        String streetName = buildStreetName(location, area);
+        String streetName = buildStreetName(inc.location, inc.area);
         return new SabreAlert(
-                "chp_" + logId,
+                "chp_" + inc.logId,
                 SabreResponseBuilder.SOURCE_CHP,
-                finalType, lat, lon, SabreResponseBuilder.HEADING_UNKNOWN, streetName, reportTs);
+                finalType, inc.lat, inc.lon, SabreResponseBuilder.HEADING_UNKNOWN, streetName, reportTs);
+    }
+
+    // ── Test-facing parse+filter entry points (kept for CHPSourceTest) ────────
+
+    List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
+                              double radiusMeters, ChpConfig config) throws Exception {
+        return filter(parseAll(xml), centerLat, centerLon, radiusMeters, config);
+    }
+
+    List<SabreAlert> parseXml(String xml, double centerLat, double centerLon,
+                              double radiusMeters) throws Exception {
+        return parseXml(xml, centerLat, centerLon, radiusMeters, null);
     }
 
     // ── Time parsing ──────────────────────────────────────────────────────────
