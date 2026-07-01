@@ -199,6 +199,17 @@ public class LcsSourceTest {
         assertTrue(LcsSource.isShoulderOnly(c));
     }
 
+    @Test
+    public void auxiliaryLane_isKept() {
+        // "Auxiliary" is a travel lane; a digit-less value that includes it must not
+        // be classified shoulder-only (real D3 feed: "Median, LShoulder, Auxiliary").
+        LcsSource.Closure c = activeClosure();
+        c.lanesClosed = "Median, LShoulder, Auxiliary, RShoulder";
+        assertFalse(LcsSource.isShoulderOnly(c));
+        c.lanesClosed = "Auxiliary";
+        assertFalse(LcsSource.isShoulderOnly(c));
+    }
+
     // ── SABRE mapping ─────────────────────────────────────────────────────────
 
     @Test
@@ -215,6 +226,19 @@ public class LcsSourceTest {
         assertTrue(a.reportTs <= Integer.MAX_VALUE);
         assertEquals("closures are directionless → -720 heading sentinel",
                 SabreResponseBuilder.HEADING_UNKNOWN, a.headingDeg, 0.0);
+    }
+
+    @Test
+    public void toAlerts_missingEpochs_fallsBackToNow() {
+        // Neither code1097Epoch nor closureStartEpoch present → report_ts must be a
+        // fresh "now", never 0 (which HR would render as a 1970 timestamp).
+        LcsSource.Closure c = activeClosure();
+        c.epoch1097 = 0;
+        c.startEpoch = 0;
+        SabreAlert a = LcsSource.toAlerts(c).get(0);
+        long nowSec = System.currentTimeMillis() / 1000L;
+        assertTrue("report_ts must fall back to ~now",
+                a.reportTs > nowSec - 60 && a.reportTs <= nowSec + 1);
     }
 
     @Test

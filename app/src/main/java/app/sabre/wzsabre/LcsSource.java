@@ -274,7 +274,10 @@ public class LcsSource {
         String l = c.lanesClosed;
         if (l == null || l.isEmpty()) return false;
         String lower = l.toLowerCase(Locale.US);
-        if (lower.contains("all") || lower.contains("hov") || lower.contains("turn")) return false;
+        // "aux" (Auxiliary) is a travel lane — closing it is a real lane closure even
+        // when the value carries no digit (e.g. "Median, LShoulder, Auxiliary").
+        if (lower.contains("all") || lower.contains("hov") || lower.contains("turn")
+                || lower.contains("aux")) return false;
         for (int i = 0; i < l.length(); i++) {
             if (Character.isDigit(l.charAt(i))) return false;
         }
@@ -289,6 +292,9 @@ public class LcsSource {
     static List<SabreAlert> toAlerts(Closure c) {
         List<SabreAlert> out = new ArrayList<>(2);
         long reportTs = c.epoch1097 > 0 ? c.epoch1097 : c.startEpoch;
+        // Both epochs missing/unparseable → fall back to now, not 0 (a "1970" report_ts
+        // that HR would age-filter away or render absurdly).
+        if (reportTs <= 0) reportTs = System.currentTimeMillis() / 1000L;
         String street = describe(c);
         out.add(new SabreAlert("lcs_" + c.index, SabreResponseBuilder.SOURCE_LCS,
                 "HAZARD_ON_ROAD_CONGESTION", c.beginLat, c.beginLon,

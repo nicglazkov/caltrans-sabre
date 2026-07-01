@@ -170,8 +170,10 @@ public class SabreResponseBuilder {
             if (a == null || !isValidType(a.type)) continue;
             try {
                 alertsArray.put(buildAlert(a));
-            } catch (RuntimeException ignored) {
-                // invalid coords / report_ts — skip this alert only
+            } catch (RuntimeException | JSONException ignored) {
+                // invalid coords / report_ts / NaN heading — skip this alert only.
+                // JSONException is caught too: JSONObject.put(double) throws it (a
+                // checked exception, not a RuntimeException) on a NaN/Infinite value.
             }
         }
         responseData.put("alerts", alertsArray);
@@ -191,6 +193,9 @@ public class SabreResponseBuilder {
         }
         if (Double.isNaN(a.lon) || Double.isInfinite(a.lon)) {
             throw new IllegalArgumentException("lon is NaN/Infinite for alert " + a.alertId);
+        }
+        if (Double.isNaN(a.headingDeg) || Double.isInfinite(a.headingDeg)) {
+            throw new IllegalArgumentException("heading_deg is NaN/Infinite for alert " + a.alertId);
         }
 
         JSONObject obj = new JSONObject();

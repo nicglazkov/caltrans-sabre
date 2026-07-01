@@ -1,6 +1,9 @@
 package app.sabre.wzsabre;
 
 import org.junit.Test;
+
+import java.util.Locale;
+
 import static org.junit.Assert.*;
 
 /** Tests that CHP and Waze alert types map to valid SABRE type constants. */
@@ -45,6 +48,27 @@ public class AlertMapperTest {
     @Test public void waze_roadClosed()      { assertEquals("HAZARD_ON_ROAD_CONGESTION", AlertMapper.fromWazeType("ROAD_CLOSED", "")); }
     @Test public void waze_unknown_returnsNull() { assertNull(AlertMapper.fromWazeType("WEATHERHAZARD", "")); }
     @Test public void waze_null_returnsNull()    { assertNull(AlertMapper.fromWazeType(null, "")); }
+
+    // ── locale independence ───────────────────────────────────────────────────
+
+    @Test
+    public void mapping_isLocaleIndependent_turkish() {
+        // On a Turkish/Azeri device, default-locale "silver".toUpperCase() dots the i
+        // (→ "SİLVER"), so contains("SILVER") would silently fail — un-suppressing
+        // Silver Alerts and misrouting other 'i'-bearing types. Mapping must uppercase
+        // with Locale.US. These inputs carry a lowercase i, the trigger condition.
+        Locale prev = Locale.getDefault();
+        try {
+            Locale.setDefault(new Locale("tr", "TR"));
+            assertNull("Silver Alert must still be excluded under tr-TR",
+                    AlertMapper.categoryFor("Silver Alert"));
+            assertEquals(ChpCategory.WEATHER, AlertMapper.categoryFor("High wind advisory"));
+            assertEquals("ACCIDENT_MAJOR", AlertMapper.fromChpLogType("Sig alert issued"));
+            assertEquals("POLICE_HIDDEN", AlertMapper.fromWazeType("police", "police_hiding"));
+        } finally {
+            Locale.setDefault(prev);
+        }
+    }
 
     @Test
     public void waze_allMappedTypesAreValid() {

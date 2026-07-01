@@ -2,6 +2,7 @@ package app.sabre.wzsabre.waze;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.SystemClock;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -55,6 +56,14 @@ public final class WazeProtocolSource {
     private static final int  SHRINK_STEPS    = 5;
     private static final long QUERY_BUDGET_MS = 10_000L;
 
+    // Backoff after a Waze account/login rejection so a persistent 4xx (purged
+    // account, rate-limit, IP flag) can't spin the register→login loop and burn the
+    // anonymous-account daily cap in seconds. Exponential 30s→10min; combined with
+    // MAX_ACCOUNTS_PER_DAY this hard-caps how fast/often we mint new accounts.
+    private static final long BACKOFF_BASE_MS = 30_000L;
+    private static final long BACKOFF_MAX_MS  = 10 * 60_000L;
+    private static final long DAY_MS          = 24 * 3600_000L;
+
     private final Context ctx;
     private final ExecutorService refreshExec = Executors.newSingleThreadExecutor();
     private final AtomicBoolean refreshing = new AtomicBoolean(false);
@@ -63,8 +72,13 @@ public final class WazeProtocolSource {
     private final WazeAlertCache alertCache = new WazeAlertCache();
     private final WazeConfirmTracker confirmTracker = new WazeConfirmTracker();
 
+    // elapsedRealtime-based so a wall-clock/NTP step can't freeze refreshes.
     private volatile long   cacheTimeMs = 0L;
     private volatile double cacheLat, cacheLon;
+
+    // Rejection backoff state — touched only on the single refresh thread.
+    private int  consecutiveRejections = 0;
+    private long backoffUntilMs        = 0L;
 
     public WazeProtocolSource(Context ctx) {
         this.ctx = ctx.getApplicationContext();
@@ -77,7 +91,7 @@ public final class WazeProtocolSource {
     public List<SabreAlert> fetchAlerts(double lat, double lon, double radiusMeters) {
         triggerRefreshIfStale(lat, lon, radiusMeters);
 
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         if (cacheTimeMs == 0
                 || (now - cacheTimeMs) > CACHE_MAX_SERVE_AGE_MS
                 || haversineKm(lat, lon, cacheLat, cacheLon) > CACHE_DISCARD_KM) {
@@ -109,7 +123,8 @@ public final class WazeProtocolSource {
     }
 
     private void triggerRefreshIfStale(double lat, double lon, double radiusMeters) {
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
+        if (now < backoffUntilMs) return;   // in rejection backoff — don't hammer Waze
         boolean moved = cacheTimeMs != 0 && haversineKm(lat, lon, cacheLat, cacheLon) > REFRESH_MOVE_KM;
         boolean stale = cacheTimeMs == 0 || (now - cacheTimeMs) > CACHE_TTL_MS || moved;
         if (stale && refreshing.compareAndSet(false, true)) {
@@ -122,7 +137,7 @@ public final class WazeProtocolSource {
                 try {
                     if (discard) alertCache.clear();
                     refresh(lat, lon, radius);
-                    cacheTimeMs = System.currentTimeMillis();
+                    cacheTimeMs = SystemClock.elapsedRealtime();
                     cacheLat = lat;
                     cacheLon = lon;
                 } catch (Exception e) {
@@ -139,18 +154,65 @@ public final class WazeProtocolSource {
         try {
             queryArea(ensureSession(lat, lon), lat, lon, radiusMeters);
         } catch (WazeExceptions.AccountRejectedException e) {
-            Log.w(TAG, "Account rejected — re-registering: " + e.getMessage());
-            session = null;
-            clearPersisted();
-            queryArea(ensureSession(lat, lon), lat, lon, radiusMeters);
+            handleAccountRejected(e, lat, lon, radiusMeters);
         } catch (WazeExceptions.SessionExpiredException e) {
             Log.w(TAG, "Session expired — re-logging in: " + e.getMessage());
-            session = null;                 // keep credentials, just re-login
+            if (session != null) session.invalidateSession();   // keep creds, just re-login
             queryArea(ensureSession(lat, lon), lat, lon, radiusMeters);
         }
-        persist();
+        // Reached only on a fully successful refresh — clear any rejection backoff.
+        consecutiveRejections = 0;
+        backoffUntilMs = 0L;
         Log.d(TAG, "Waze cache: " + alertCache.size() + " alerts near "
                 + String.format(Locale.US, "%.4f,%.4f", lat, lon));
+    }
+
+    /**
+     * Recover from a rejected account. Backs off before the next refresh regardless,
+     * and only mints a replacement account while under the per-day cap — so a
+     * persistent rejection can't burn the anonymous-account quota. Once the cap or
+     * the consecutive-rejection ceiling is hit, gives up this cycle (cache unchanged)
+     * and lets the growing backoff throttle retries.
+     */
+    private void handleAccountRejected(Exception e, double lat, double lon, double radiusMeters)
+            throws Exception {
+        consecutiveRejections++;
+        setBackoff();
+        if (!canRegisterToday() || consecutiveRejections > WazeConstants.MAX_CONSECUTIVE_REJECTIONS) {
+            Log.w(TAG, "Account rejected; registration cap/limit reached (" + consecutiveRejections
+                    + " consecutive) — backing off without re-registering: " + e.getMessage());
+            throw e;
+        }
+        Log.w(TAG, "Account rejected — re-registering (attempt " + consecutiveRejections + "): "
+                + e.getMessage());
+        session = null;
+        clearPersisted();
+        recordRegistration();
+        queryArea(ensureSession(lat, lon), lat, lon, radiusMeters);
+    }
+
+    private void setBackoff() {
+        int step = Math.min(Math.max(consecutiveRejections, 1), 5);
+        long delay = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * (1L << (step - 1)));
+        backoffUntilMs = SystemClock.elapsedRealtime() + delay;
+        Log.d(TAG, "Waze refresh backing off " + (delay / 1000) + "s");
+    }
+
+    private boolean canRegisterToday() {
+        SharedPreferences p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        long now = System.currentTimeMillis();
+        long windowStart = p.getLong("reg_window_start", 0L);
+        if (now - windowStart > DAY_MS) return true;   // 24h window rolled over
+        return p.getInt("reg_count", 0) < WazeConstants.MAX_ACCOUNTS_PER_DAY;
+    }
+
+    private void recordRegistration() {
+        SharedPreferences p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        long now = System.currentTimeMillis();
+        long windowStart = p.getLong("reg_window_start", 0L);
+        int count = p.getInt("reg_count", 0);
+        if (now - windowStart > DAY_MS) { windowStart = now; count = 0; }
+        p.edit().putLong("reg_window_start", windowStart).putInt("reg_count", count + 1).apply();
     }
 
     /**
@@ -162,11 +224,22 @@ public final class WazeProtocolSource {
      * thinning that drops minor/near-driver alerts from a single large query.
      */
     private void queryArea(WazeSession s, double lat, double lon, double radiusMeters) throws Exception {
+        long sessionBefore = s.currentServerSessionId();
         s.prepareForArea(lat, lon);
+        // Credentials exist now (register/login just ran) — persist immediately so a
+        // failure in the box loop below can't lose a freshly minted account and force
+        // a wasteful re-register on the next run.
+        persist();
+        if (s.currentServerSessionId() != sessionBefore) {
+            // A new server session re-sends all currently-active alerts for the area
+            // but sends no RmAlert for alerts that cleared while we were logged out.
+            // Drop the stale cache so those don't linger in Highway Radar as ghosts.
+            alertCache.clear();
+        }
         double[][] zoomBoxes = GeoBoxes.shrinkingBoxes(lon, lat, radiusMeters, SHRINK_STEPS);
-        long deadline = System.currentTimeMillis() + QUERY_BUDGET_MS;
+        long deadline = SystemClock.elapsedRealtime() + QUERY_BUDGET_MS;
         for (double[] zoom : zoomBoxes) {
-            if (System.currentTimeMillis() >= deadline) break;   // best-effort, like the official
+            if (SystemClock.elapsedRealtime() >= deadline) break;   // best-effort, like the official
             WazeProto.Batch batch = s.queryBox(GeoBoxes.shrink(zoom, 0.75));
             alertCache.submit(new AlertQueryResult(
                     WazeRtCodec.parseAlerts(batch), WazeRtCodec.parseRemovedAlertIds(batch)));
@@ -235,8 +308,14 @@ public final class WazeProtocolSource {
                 .apply();
     }
 
+    /** Clear only the credential/device keys — the registration-rate counter
+     *  (reg_count / reg_window_start) must survive so the per-day cap still holds. */
     private void clearPersisted() {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply();
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .remove("community").remove("secret")
+                .remove("dev_mfr").remove("dev_model").remove("dev_os")
+                .remove("dev_w").remove("dev_h").remove("dev_iid")
+                .apply();
     }
 
     private static double haversineKm(double lat1, double lon1, double lat2, double lon2) {

@@ -233,6 +233,18 @@ public class SabreProtocolTest {
     }
 
     @Test
+    public void build_dropsNaNHeading_keepsValidAlerts() throws Exception {
+        // JSONObject.put(double) throws a *checked* JSONException on a NaN heading;
+        // that must be caught so one bad alert can't blank the whole batch.
+        SabreAlert bad = new SabreAlert("bad", "chp", "POLICE_VISIBLE",
+                34.0, -118.0, Double.NaN, null, NOW_SECONDS);
+        JSONObject root = new JSONObject(SabreResponseBuilder.build("r",
+                java.util.Arrays.asList(bad, chpAlert())));
+        assertEquals("NaN-heading alert dropped, valid alert kept", 1,
+                root.getJSONObject("response").getJSONArray("alerts").length());
+    }
+
+    @Test
     public void build_dropsUnknownType_keepsValidAlerts() throws Exception {
         // An unknown SABRE type string would crash HR's renderer — never send it.
         SabreAlert bad = new SabreAlert("bad", "chp", "TOTALLY_BOGUS_TYPE",
