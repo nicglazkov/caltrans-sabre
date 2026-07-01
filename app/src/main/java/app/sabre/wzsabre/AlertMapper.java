@@ -1,5 +1,7 @@
 package app.sabre.wzsabre;
 
+import java.util.Locale;
+
 /**
  * Maps CHP LogType strings and Waze alert types to SABRE protocol alert types.
  */
@@ -14,7 +16,7 @@ public class AlertMapper {
      */
     public static ChpCategory categoryFor(String logType) {
         if (logType == null) return null;
-        String t = logType.toUpperCase();
+        String t = logType.toUpperCase(Locale.US);
         if (t.contains("SILVER") || t.contains("MISSING")) return null;
 
         // Injury / fatal collisions. 1180 (major inj), 1181 (minor inj), 1183
@@ -47,7 +49,7 @@ public class AlertMapper {
 
     public static String fromChpLogType(String logType) {
         if (logType == null) return null;
-        String t = logType.toUpperCase();
+        String t = logType.toUpperCase(Locale.US);
 
         // Injury / fatal collisions (any injury = major; see categoryFor)
         if (t.contains("1179") || t.contains("1141")) return "ACCIDENT_MAJOR";
@@ -94,8 +96,8 @@ public class AlertMapper {
 
     public static String fromWazeType(String type, String subtype) {
         if (type == null) return null;
-        String t = type.toUpperCase();
-        String s = subtype != null ? subtype.toUpperCase() : "";
+        String t = type.toUpperCase(Locale.US);
+        String s = subtype != null ? subtype.toUpperCase(Locale.US) : "";
 
         switch (t) {
             case "POLICE":
