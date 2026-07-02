@@ -49,6 +49,26 @@ public class AlertDeduperTest {
     }
 
     @Test
+    public void sameSourceCoLocatedNotMerged() {
+        // Two distinct CHP accidents ~30m apart at an interchange must BOTH survive —
+        // only cross-source duplicates are collapsed.
+        List<SabreAlert> in = Arrays.asList(
+                a("chp_1", SabreResponseBuilder.SOURCE_CHP, "ACCIDENT_MAJOR", LAT, LON, 0),
+                a("chp_2", SabreResponseBuilder.SOURCE_CHP, "ACCIDENT_MAJOR", LAT + 0.0003, LON, 0));
+        assertEquals(2, AlertDeduper.dedupe(in).size());
+    }
+
+    @Test
+    public void sosNotMergedWithGenericHazard() {
+        // An SOS (stranded/emergency) and a debris hazard at the same spot are
+        // different events even across sources.
+        List<SabreAlert> in = Arrays.asList(
+                a("waze_alert-1/u", SabreResponseBuilder.SOURCE_WAZE, "SOS_MEDICAL_HELP", LAT, LON, 0),
+                a("chp_1", SabreResponseBuilder.SOURCE_CHP, "HAZARD_ON_ROAD_DEBRIS", LAT, LON, 0));
+        assertEquals(2, AlertDeduper.dedupe(in).size());
+    }
+
+    @Test
     public void wildfireNotMergedWithGenericHazard() {
         // Fire and a debris hazard share the HAZARD_ON_ROAD type string but must not merge.
         List<SabreAlert> in = Arrays.asList(

@@ -2,6 +2,17 @@
 
 All notable changes to this project. This project adheres to [semantic-ish versioning](https://semver.org/); dates are release dates.
 
+## [1.6.1] — 2026-07-02
+
+Hardening from a post-release review of v1.6.
+
+### Fixed
+- Wildfire outages no longer look like "no active fires" — a broken feed now surfaces as an error in diagnostics, and prescribed burns can't slip in as wildfires.
+- Duplicate-pin merging now only collapses pins from *different* sources, so two genuinely separate incidents at the same spot are never dropped (also restores the debug "one of each type" harness).
+- The update check no longer leaks the settings screen on rotation and no longer calls GitHub on every open.
+- Automated release is now re-runnable, requires all signing secrets before it attempts to sign, and skips cleanly otherwise.
+- Minor: diagnostics status is now a consistent snapshot; the wildfire source isn't fetched when disabled.
+
 ## [1.6] — 2026-07-02
 
 New data source, in-app updates, and quality-of-life.
@@ -77,6 +88,7 @@ Restored the plugin on Android 15/16 (foreground-service start fixes) and rewrot
 
 Initial release: CHP live incidents + Waze crowdsourced alerts for Highway Radar.
 
+[1.6.1]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.6.1
 [1.6]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.6
 [1.5.1]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.5.1
 [1.5]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.5

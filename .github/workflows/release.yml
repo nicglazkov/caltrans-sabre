@@ -28,12 +28,16 @@ jobs:
       - id: check
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] \
+             && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "signable=true" >> "$GITHUB_OUTPUT"
           else
             echo "signable=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No KEYSTORE_BASE64 secret set — skipping automated release. Release manually or add signing secrets (see BUILDING.md)."
+            echo "::warning::Signing secrets missing/incomplete — skipping automated release. Release manually or add all four secrets (see BUILDING.md)."
           fi
 
   release:
@@ -80,10 +84,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
-            "CHP-Waze-SABRE-${GITHUB_REF_NAME}.apk" \
-            --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+          APK="CHP-Waze-SABRE-${GITHUB_REF_NAME}.apk"
+          # Idempotent: if a release for this tag already exists (re-run or re-pushed
+          # tag), attach/replace the APK instead of failing on "already exists".
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" "$APK" --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" "$APK" \
+              --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
 
       - name: Clean up secrets
         if: always()
