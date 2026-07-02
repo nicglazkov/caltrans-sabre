@@ -18,7 +18,27 @@ permissions:
   contents: write
 
 jobs:
+  # Skip cleanly (with a warning) when signing secrets aren't configured, so a
+  # manual/tag release doesn't produce a failed workflow run.
+  guard:
+    runs-on: ubuntu-latest
+    outputs:
+      signable: ${{ steps.check.outputs.signable }}
+    steps:
+      - id: check
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "signable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signable=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No KEYSTORE_BASE64 secret set — skipping automated release. Release manually or add signing secrets (see BUILDING.md)."
+          fi
+
   release:
+    needs: guard
+    if: needs.guard.outputs.signable == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
