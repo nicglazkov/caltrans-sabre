@@ -262,8 +262,12 @@ public class SabreService extends Service {
                     allAlerts.addAll(buildTestAlerts(testLat, testLon));
                 }
 
-                Log.d(TAG, "Sending " + allAlerts.size() + " total alerts");
-                sendFetchResponse(responseAction, requestId, allAlerts);
+                // Collapse duplicate pins across sources (e.g. CHP + Waze accident at
+                // the same spot) before sending.
+                int rawCount = allAlerts.size();
+                List<SabreAlert> finalAlerts = AlertDeduper.dedupe(allAlerts);
+                Log.d(TAG, "Sending " + finalAlerts.size() + " alerts (" + rawCount + " before dedupe)");
+                sendFetchResponse(responseAction, requestId, finalAlerts);
             } catch (Exception e) {
                 Log.e(TAG, "Error handling fetch request", e);
                 if (requestId != null && responseAction != null) {
