@@ -137,6 +137,7 @@ public class SabreService extends Service {
             pp.edit().putLong("update_check_ms", System.currentTimeMillis()).apply();
             if (r == null) return;
             if (!UpdateChecker.isNewer(r.latestVersion, BuildConfig.VERSION_NAME)) return;
+            if (!ChpConfig.load(this).updateNotifyEnabled) return;   // user silenced update notifications
             if (r.latestVersion.equals(pp.getString("update_notified_version", null))) return;
             postUpdateNotification(r);
             pp.edit().putString("update_notified_version", r.latestVersion).apply();
@@ -257,7 +258,7 @@ public class SabreService extends Service {
                         ? fetchExecutor.submit(() -> lcsSource.fetchAlerts(lat, lon, radius))
                         : null;
                 Future<List<SabreAlert>> fireFuture = chpConfig.fireEnabled
-                        ? fetchExecutor.submit(() -> fireSource.fetchAlerts(lat, lon, radius))
+                        ? fetchExecutor.submit(() -> fireSource.fetchAlerts(lat, lon, radius, chpConfig.fireMinAcres))
                         : null;
                 Future<List<SabreAlert>> chainsFuture = chpConfig.chainsEnabled
                         ? fetchExecutor.submit(() -> chainsSource.fetchAlerts(lat, lon, radius))
@@ -282,8 +283,14 @@ public class SabreService extends Service {
                 if (wazeMs > 500) {
                     try {
                         List<SabreAlert> wazeAlerts = wazeFuture.get(wazeMs, TimeUnit.MILLISECONDS);
-                        allAlerts.addAll(wazeAlerts);
-                        Log.d(TAG, "Waze: " + wazeAlerts.size() + " alerts");
+                        int kept = 0;
+                        for (SabreAlert wa : wazeAlerts) {
+                            if (chpConfig.isWazeCategoryEnabled(AlertMapper.wazeCategory(wa.type))) {
+                                allAlerts.add(wa);
+                                kept++;
+                            }
+                        }
+                        Log.d(TAG, "Waze: " + kept + "/" + wazeAlerts.size() + " alerts (after category filter)");
                     } catch (Exception e) {
                         Log.w(TAG, "Waze unavailable this cycle: " + e.getClass().getSimpleName());
                         wazeFuture.cancel(true);

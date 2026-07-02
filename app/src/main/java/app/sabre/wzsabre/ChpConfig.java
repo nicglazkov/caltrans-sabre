@@ -46,6 +46,38 @@ public class ChpConfig {
     public boolean chainsEnabled;
     private static final String KEY_CHAINS_ENABLED = "chains_enabled";
 
+    // ── Update notification ────────────────────────────────────────────────────
+    /** When false, the once-per-version update notification is suppressed (the
+     *  in-app banner still shows). */
+    public boolean updateNotifyEnabled;
+    private static final String KEY_UPDATE_NOTIFY = "update_notify_enabled";
+
+    // ── Wildfire noise control ─────────────────────────────────────────────────
+    /** Hide wildfires smaller than this many acres (0 = show all). */
+    public int fireMinAcres;
+    private static final String KEY_FIRE_MIN_ACRES = "fire_min_acres";
+
+    // ── Waze category filters (coarse) ─────────────────────────────────────────
+    // Each toggles a whole class of Waze alerts. Default all on.
+    public boolean wazePolice, wazeAccidents, wazeHazards, wazeJams, wazeClosures;
+    private static final String KEY_WAZE_POLICE    = "waze_police";
+    private static final String KEY_WAZE_ACCIDENTS = "waze_accidents";
+    private static final String KEY_WAZE_HAZARDS   = "waze_hazards";
+    private static final String KEY_WAZE_JAMS      = "waze_jams";
+    private static final String KEY_WAZE_CLOSURES  = "waze_closures";
+
+    /** @return whether a Waze coarse category ("police"/"accidents"/... from
+     *  {@link AlertMapper#wazeCategory}) is currently enabled. */
+    public boolean isWazeCategoryEnabled(String category) {
+        switch (category) {
+            case "police":    return wazePolice;
+            case "accidents": return wazeAccidents;
+            case "jams":      return wazeJams;
+            case "closures":  return wazeClosures;
+            default:          return wazeHazards;   // hazards + anything else
+        }
+    }
+
     // ── Constructor (defaults) ───────────────────────────────────────────────
     private ChpConfig() {
         for (ChpCategory cat : ChpCategory.values()) {
@@ -56,6 +88,9 @@ public class ChpConfig {
         lcsEnabled = true;
         fireEnabled = true;
         chainsEnabled = true;
+        updateNotifyEnabled = true;
+        fireMinAcres = 0;
+        wazePolice = wazeAccidents = wazeHazards = wazeJams = wazeClosures = true;
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
@@ -112,6 +147,13 @@ public class ChpConfig {
         cfg.lcsEnabled    = prefs.getBoolean(KEY_LCS_ENABLED, true);
         cfg.fireEnabled   = prefs.getBoolean(KEY_FIRE_ENABLED, true);
         cfg.chainsEnabled = prefs.getBoolean(KEY_CHAINS_ENABLED, true);
+        cfg.updateNotifyEnabled = prefs.getBoolean(KEY_UPDATE_NOTIFY, true);
+        cfg.fireMinAcres  = Math.max(0, prefs.getInt(KEY_FIRE_MIN_ACRES, 0));
+        cfg.wazePolice    = prefs.getBoolean(KEY_WAZE_POLICE, true);
+        cfg.wazeAccidents = prefs.getBoolean(KEY_WAZE_ACCIDENTS, true);
+        cfg.wazeHazards   = prefs.getBoolean(KEY_WAZE_HAZARDS, true);
+        cfg.wazeJams      = prefs.getBoolean(KEY_WAZE_JAMS, true);
+        cfg.wazeClosures  = prefs.getBoolean(KEY_WAZE_CLOSURES, true);
         return cfg;
     }
 
@@ -130,6 +172,13 @@ public class ChpConfig {
         ed.putBoolean(KEY_LCS_ENABLED, lcsEnabled);
         ed.putBoolean(KEY_FIRE_ENABLED, fireEnabled);
         ed.putBoolean(KEY_CHAINS_ENABLED, chainsEnabled);
+        ed.putBoolean(KEY_UPDATE_NOTIFY, updateNotifyEnabled);
+        ed.putInt(KEY_FIRE_MIN_ACRES, fireMinAcres);
+        ed.putBoolean(KEY_WAZE_POLICE, wazePolice);
+        ed.putBoolean(KEY_WAZE_ACCIDENTS, wazeAccidents);
+        ed.putBoolean(KEY_WAZE_HAZARDS, wazeHazards);
+        ed.putBoolean(KEY_WAZE_JAMS, wazeJams);
+        ed.putBoolean(KEY_WAZE_CLOSURES, wazeClosures);
         ed.apply();
     }
 
@@ -187,5 +236,19 @@ public class ChpConfig {
             if (AGE_VALUES_MINUTES[i] == minutes) return i;
         }
         return 2; // default to 1 hour
+    }
+
+    // ── Wildfire min-size option helpers ────────────────────────────────────────
+
+    public static final int[]    FIRE_SIZE_VALUES = { 0, 10, 100, 1000 };
+    public static final String[] FIRE_SIZE_LABELS = {
+        "All sizes", "10+ acres", "100+ acres", "1000+ acres"
+    };
+
+    public static int fireSizeToSpinnerIndex(int acres) {
+        for (int i = 0; i < FIRE_SIZE_VALUES.length; i++) {
+            if (FIRE_SIZE_VALUES[i] == acres) return i;
+        }
+        return 0; // default to all sizes
     }
 }
