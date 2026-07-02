@@ -42,6 +42,10 @@ public class ChpConfig {
     public boolean fireEnabled;
     private static final String KEY_FIRE_ENABLED = "fire_enabled";
 
+    // ── Chain controls (Caltrans CC) ──────────────────────────────────────────
+    public boolean chainsEnabled;
+    private static final String KEY_CHAINS_ENABLED = "chains_enabled";
+
     // ── Constructor (defaults) ───────────────────────────────────────────────
     private ChpConfig() {
         for (ChpCategory cat : ChpCategory.values()) {
@@ -51,6 +55,7 @@ public class ChpConfig {
         maxAgeMinutes = 60;  // 1 hour default
         lcsEnabled = true;
         fireEnabled = true;
+        chainsEnabled = true;
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────
@@ -106,6 +111,7 @@ public class ChpConfig {
         cfg.maxAgeMinutes = prefs.getInt(KEY_MAX_AGE, 60);
         cfg.lcsEnabled    = prefs.getBoolean(KEY_LCS_ENABLED, true);
         cfg.fireEnabled   = prefs.getBoolean(KEY_FIRE_ENABLED, true);
+        cfg.chainsEnabled = prefs.getBoolean(KEY_CHAINS_ENABLED, true);
         return cfg;
     }
 
@@ -123,6 +129,7 @@ public class ChpConfig {
         ed.putInt(KEY_MAX_AGE, maxAgeMinutes);
         ed.putBoolean(KEY_LCS_ENABLED, lcsEnabled);
         ed.putBoolean(KEY_FIRE_ENABLED, fireEnabled);
+        ed.putBoolean(KEY_CHAINS_ENABLED, chainsEnabled);
         ed.apply();
     }
 

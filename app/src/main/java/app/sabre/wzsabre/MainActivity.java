@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
         buildCategoryRows();
         buildLcsSwitch();
         buildFireSwitch();
+        buildChainsSwitch();
         buildAgeSpinner();
         buildDiagnostics();
         checkForUpdate();
@@ -117,6 +118,7 @@ public class MainActivity extends Activity {
                 {SabreResponseBuilder.SOURCE_WAZE, "Waze alerts"},
                 {SabreResponseBuilder.SOURCE_LCS,  "Caltrans closures"},
                 {SabreResponseBuilder.SOURCE_FIRE, "Wildfires"},
+                {SabreResponseBuilder.SOURCE_CHAINS, "Chain controls"},
         };
         for (String[] s : sources) {
             SourceStatus.Entry e = SourceStatus.get(s[0]);
@@ -161,6 +163,15 @@ public class MainActivity extends Activity {
         sw.setChecked(config.fireEnabled);
         sw.setOnCheckedChangeListener((CompoundButton btn, boolean isChecked) -> {
             config.fireEnabled = isChecked;
+            config.save(this);
+        });
+    }
+
+    private void buildChainsSwitch() {
+        Switch sw = findViewById(R.id.chainsSwitch);
+        sw.setChecked(config.chainsEnabled);
+        sw.setOnCheckedChangeListener((CompoundButton btn, boolean isChecked) -> {
+            config.chainsEnabled = isChecked;
             config.save(this);
         });
     }

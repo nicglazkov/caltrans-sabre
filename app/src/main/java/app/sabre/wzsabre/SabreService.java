@@ -62,6 +62,7 @@ public class SabreService extends Service {
     private CHPSource chpSource;
     private LcsSource lcsSource;
     private WildfireSource fireSource;
+    private WinterSource chainsSource;
     private app.sabre.wzsabre.waze.WazeProtocolSource wazeSource;
 
     // Last fetch location, persisted so the Waze session can be pre-warmed at the
@@ -76,10 +77,11 @@ public class SabreService extends Service {
         super.onCreate();
         RUNNING = true;
         requestExecutor = Executors.newSingleThreadExecutor();
-        fetchExecutor   = Executors.newFixedThreadPool(4);
+        fetchExecutor   = Executors.newFixedThreadPool(5);
         chpSource  = new CHPSource();
         lcsSource  = new LcsSource();
         fireSource = new WildfireSource();
+        chainsSource = new WinterSource();
         wazeSource = new app.sabre.wzsabre.waze.WazeProtocolSource(this);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildForegroundNotification());
@@ -110,8 +112,10 @@ public class SabreService extends Service {
         double lon = Double.longBitsToDouble(p.getLong("last_lon", 0));
         double radius = Double.longBitsToDouble(p.getLong("last_radius", 0));
         if (radius <= 0) radius = 80_000;
-        Log.d(TAG, String.format("Pre-warming Waze for last location %.4f,%.4f", lat, lon));
+        Log.d(TAG, String.format("Pre-warming for last location %.4f,%.4f", lat, lon));
         wazeSource.prewarm(lat, lon, radius);
+        // Chain controls are per-district (need a location); warm only if enabled.
+        if (ChpConfig.load(this).chainsEnabled) chainsSource.prewarm(lat, lon, radius);
     }
 
     private void saveLastLocation(double lat, double lon, double radius) {
@@ -216,6 +220,7 @@ public class SabreService extends Service {
         if (lcsSource  != null) lcsSource.shutdown();
         if (chpSource  != null) chpSource.shutdown();
         if (fireSource != null) fireSource.shutdown();
+        if (chainsSource != null) chainsSource.shutdown();
         super.onDestroy();
     }
 
@@ -253,6 +258,9 @@ public class SabreService extends Service {
                         : null;
                 Future<List<SabreAlert>> fireFuture = chpConfig.fireEnabled
                         ? fetchExecutor.submit(() -> fireSource.fetchAlerts(lat, lon, radius))
+                        : null;
+                Future<List<SabreAlert>> chainsFuture = chpConfig.chainsEnabled
+                        ? fetchExecutor.submit(() -> chainsSource.fetchAlerts(lat, lon, radius))
                         : null;
 
                 List<SabreAlert> allAlerts = new ArrayList<>();
@@ -306,6 +314,18 @@ public class SabreService extends Service {
                     } catch (Exception e) {
                         Log.w(TAG, "Wildfire unavailable this cycle: " + e.getClass().getSimpleName());
                         fireFuture.cancel(true);
+                    }
+                }
+
+                // Chain controls serve from cache and never block; 1s is generous
+                if (chainsFuture != null) {
+                    try {
+                        List<SabreAlert> chainAlerts = chainsFuture.get(1, TimeUnit.SECONDS);
+                        allAlerts.addAll(chainAlerts);
+                        Log.d(TAG, "Chains: " + chainAlerts.size() + " alerts");
+                    } catch (Exception e) {
+                        Log.w(TAG, "Chain controls unavailable this cycle: " + e.getClass().getSimpleName());
+                        chainsFuture.cancel(true);
                     }
                 }
 
