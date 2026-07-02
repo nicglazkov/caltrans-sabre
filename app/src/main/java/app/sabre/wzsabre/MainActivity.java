@@ -50,6 +50,7 @@ public class MainActivity extends Activity {
         updateServiceStatus();
         buildCategoryRows();
         buildLcsSwitch();
+        buildFireSwitch();
         buildAgeSpinner();
     }
 
@@ -58,6 +59,15 @@ public class MainActivity extends Activity {
         sw.setChecked(config.lcsEnabled);
         sw.setOnCheckedChangeListener((CompoundButton btn, boolean isChecked) -> {
             config.lcsEnabled = isChecked;
+            config.save(this);
+        });
+    }
+
+    private void buildFireSwitch() {
+        Switch sw = findViewById(R.id.fireSwitch);
+        sw.setChecked(config.fireEnabled);
+        sw.setOnCheckedChangeListener((CompoundButton btn, boolean isChecked) -> {
+            config.fireEnabled = isChecked;
             config.save(this);
         });
     }

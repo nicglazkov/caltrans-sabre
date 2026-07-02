@@ -54,6 +54,7 @@ public class SabreService extends Service {
     private ExecutorService fetchExecutor;
     private CHPSource chpSource;
     private LcsSource lcsSource;
+    private WildfireSource fireSource;
     private app.sabre.wzsabre.waze.WazeProtocolSource wazeSource;
 
     // Last fetch location, persisted so the Waze session can be pre-warmed at the
@@ -68,13 +69,15 @@ public class SabreService extends Service {
         super.onCreate();
         RUNNING = true;
         requestExecutor = Executors.newSingleThreadExecutor();
-        fetchExecutor   = Executors.newFixedThreadPool(3);
+        fetchExecutor   = Executors.newFixedThreadPool(4);
         chpSource  = new CHPSource();
         lcsSource  = new LcsSource();
+        fireSource = new WildfireSource();
         wazeSource = new app.sabre.wzsabre.waze.WazeProtocolSource(this);
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildForegroundNotification());
         chpSource.prewarm();          // statewide feed — no location needed
+        fireSource.prewarm();         // statewide feed — no location needed
         prewarmFromLastLocation();    // Waze — needs last known location
         armIdleStop();                // stop if no HR activity arrives
         Log.d(TAG, "Service started");
@@ -161,6 +164,7 @@ public class SabreService extends Service {
         if (wazeSource != null) wazeSource.shutdown();
         if (lcsSource  != null) lcsSource.shutdown();
         if (chpSource  != null) chpSource.shutdown();
+        if (fireSource != null) fireSource.shutdown();
         super.onDestroy();
     }
 
@@ -195,6 +199,9 @@ public class SabreService extends Service {
                 Future<List<SabreAlert>> wazeFuture = fetchExecutor.submit(() -> wazeSource.fetchAlerts(lat, lon, radius));
                 Future<List<SabreAlert>> lcsFuture  = chpConfig.lcsEnabled
                         ? fetchExecutor.submit(() -> lcsSource.fetchAlerts(lat, lon, radius))
+                        : null;
+                Future<List<SabreAlert>> fireFuture = chpConfig.fireEnabled
+                        ? fetchExecutor.submit(() -> fireSource.fetchAlerts(lat, lon, radius))
                         : null;
 
                 List<SabreAlert> allAlerts = new ArrayList<>();
@@ -236,6 +243,18 @@ public class SabreService extends Service {
                     } catch (Exception e) {
                         Log.w(TAG, "LCS unavailable this cycle: " + e.getClass().getSimpleName());
                         lcsFuture.cancel(true);
+                    }
+                }
+
+                // Wildfires serve from cache and never block; 1s is generous
+                if (fireFuture != null) {
+                    try {
+                        List<SabreAlert> fireAlerts = fireFuture.get(1, TimeUnit.SECONDS);
+                        allAlerts.addAll(fireAlerts);
+                        Log.d(TAG, "Wildfire: " + fireAlerts.size() + " alerts");
+                    } catch (Exception e) {
+                        Log.w(TAG, "Wildfire unavailable this cycle: " + e.getClass().getSimpleName());
+                        fireFuture.cancel(true);
                     }
                 }
 
