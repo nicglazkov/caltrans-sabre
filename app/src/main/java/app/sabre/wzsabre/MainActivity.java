@@ -58,12 +58,30 @@ public class MainActivity extends Activity {
 
     // ── Update banner ─────────────────────────────────────────────────────────
 
+    // Throttle GitHub checks and cache the decision across Activity re-creations
+    // (rotation, quick reopen) so we don't hit the API on every onCreate.
+    private static final long UPDATE_CHECK_THROTTLE_MS = 30 * 60_000L;
+    private static volatile long lastUpdateCheckMs = 0L;
+    private static volatile UpdateChecker.Result pendingUpdate; // non-null → show the card
+
     private void checkForUpdate() {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (lastUpdateCheckMs != 0 && now - lastUpdateCheckMs < UPDATE_CHECK_THROTTLE_MS) {
+            showUpdateCard(pendingUpdate);   // reuse the last decision (may be null)
+            return;
+        }
+        lastUpdateCheckMs = now;
         new Thread(() -> {
             UpdateChecker.Result r = UpdateChecker.fetchLatest();
-            boolean newer = r != null
-                    && UpdateChecker.isNewer(r.latestVersion, BuildConfig.VERSION_NAME);
-            runOnUiThread(() -> showUpdateCard(newer ? r : null));
+            UpdateChecker.Result showable = (r != null
+                    && UpdateChecker.isNewer(r.latestVersion, BuildConfig.VERSION_NAME)) ? r : null;
+            pendingUpdate = showable;
+            runOnUiThread(() -> {
+                // The thread outlives a destroyed Activity (up to ~12s); don't touch
+                // its views if it's gone.
+                if (isFinishing() || isDestroyed()) return;
+                showUpdateCard(showable);
+            });
         }).start();
     }
 
