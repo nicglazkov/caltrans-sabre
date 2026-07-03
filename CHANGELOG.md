@@ -2,6 +2,11 @@
 
 All notable changes to this project. This project adheres to [semantic-ish versioning](https://semver.org/); dates are release dates.
 
+## [1.7.2] — 2026-07-02
+
+### Added
+- **"Report a bug / send feedback" button** in the settings screen — opens the GitHub issue form in your browser, pre-filled with your plugin and Android version. (No new permissions.)
+
 ## [1.7.1] — 2026-07-02
 
 Fix found from a real test drive.
@@ -106,6 +111,7 @@ Restored the plugin on Android 15/16 (foreground-service start fixes) and rewrot
 
 Initial release: CHP live incidents + Waze crowdsourced alerts for Highway Radar.
 
+[1.7.2]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.7.2
 [1.7.1]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.7.1
 [1.7]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.7
 [1.6.1]: https://github.com/nicglazkov/caltrans-sabre/releases/tag/v1.6.1

@@ -61,7 +61,31 @@ public class MainActivity extends Activity {
         buildUpdateNotifySwitch();
         buildAgeSpinner();
         buildDiagnostics();
+        buildReportButton();
         checkForUpdate();
+    }
+
+    /**
+     * Opens the GitHub bug-report issue form in the browser, pre-filling the plugin
+     * and Android versions. Uses ACTION_VIEW (no permission needed).
+     */
+    private void buildReportButton() {
+        findViewById(R.id.reportButton).setOnClickListener(v -> {
+            String url = "https://github.com/nicglazkov/caltrans-sabre/issues/new"
+                    + "?template=bug_report.yml"
+                    + "&plugin-version=" + Uri.encode(BuildConfig.VERSION_NAME)
+                    + "&android-version=" + Uri.encode(
+                            "Android " + Build.VERSION.RELEASE + " (" + Build.MODEL + ")");
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception e) {
+                // No browser / template unavailable — fall back to the issues list.
+                try {
+                    startActivity(new Intent(Intent.ACTION_VIEW,
+                            Uri.parse("https://github.com/nicglazkov/caltrans-sabre/issues")));
+                } catch (Exception ignored) {}
+            }
+        });
     }
 
     private void buildFireSizeSpinner() {

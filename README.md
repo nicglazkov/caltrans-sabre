@@ -4,6 +4,7 @@
 
 [![CI](https://github.com/nicglazkov/caltrans-sabre/actions/workflows/ci.yml/badge.svg)](https://github.com/nicglazkov/caltrans-sabre/actions/workflows/ci.yml)
 [![Latest release](https://img.shields.io/github/v/release/nicglazkov/caltrans-sabre?sort=semver)](https://github.com/nicglazkov/caltrans-sabre/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/nicglazkov/caltrans-sabre/total)](https://github.com/nicglazkov/caltrans-sabre/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Android 7.0+](https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white)](#requirements)
 

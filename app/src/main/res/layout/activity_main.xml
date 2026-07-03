@@ -421,6 +421,13 @@
                 android:textSize="13sp"
                 android:textColor="#424242"
                 android:layout_marginTop="6dp" />
+
+            <Button
+                android:id="@+id/reportButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Report a bug / send feedback"
+                android:layout_marginTop="10dp" />
         </LinearLayout>
 
     </LinearLayout>
