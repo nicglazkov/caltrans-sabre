@@ -1,4 +1,4 @@
-# CHP + Waze SABRE for Highway Radar
+# SABRE Plus for Highway Radar
 
 <img align="right" width="104" src="docs/screenshots/app-icon.png" alt="App icon">
 
@@ -52,8 +52,8 @@ All sources run in parallel and feed into the standard HR crowdsourced-alerts la
 1. Go to the [Releases](../../releases) page and download the latest APK.
 2. On your Android device, open **Settings → Security** (or *Install unknown apps*) and allow installs from your browser or file manager. If Google Play Protect warns that the app is unrecognized, tap **More details → Install anyway**.
 3. Open the downloaded APK and tap **Install**.
-4. Open the **CHP + Waze SABRE** app once. On first launch, **allow notifications** and **allow the battery-optimization exemption** when prompted, without these the background service can be frozen and alerts stop.
-5. Open **Highway Radar → Settings → SABRE** and select **CHP + Waze SABRE**.
+4. Open the **SABRE Plus** app once. On first launch, **allow notifications** and **allow the battery-optimization exemption** when prompted, without these the background service can be frozen and alerts stop.
+5. Open **Highway Radar → Settings → SABRE** and select **SABRE Plus**.
 
 > **Why the persistent notification?** Android requires a foreground-service notification while the plugin is feeding alerts. The plugin only runs while Highway Radar is open and stops itself shortly after you close HR, so it isn't running (or notifying) in the background the rest of the time.
 
@@ -71,7 +71,7 @@ See [BUILDING.md](BUILDING.md).
 
 ## Configuration
 
-Open the **CHP + Waze SABRE** app to access settings. All changes take effect immediately on the next HR map refresh, no restart needed.
+Open the **SABRE Plus** app to access settings. All changes take effect immediately on the next HR map refresh, no restart needed.
 
 ### Alert Categories
 
@@ -114,7 +114,7 @@ If you already have wzsabre installed:
 ## Troubleshooting
 
 **"Crowd-Sourced Alert Problems" banner in HR**
-- Open the CHP + Waze SABRE app and check that the service status shows *"Plugin active"*.
+- Open the SABRE Plus app and check that the service status shows *"Plugin active"*.
 - Tap the green start button in HR, this sends a fresh handshake.
 - On Android 15: open this app first, then HR. The background service must be running before HR requests data.
 
@@ -123,7 +123,7 @@ If you already have wzsabre installed:
 - Check that the app has network permission (it should request none explicitly; all network access is in the background service).
 
 **No alerts at all**
-- Confirm HR is using the correct plugin: HR → Settings → SABRE → should show "CHP + Waze SABRE".
+- Confirm HR is using the correct plugin: HR → Settings → SABRE → should show "SABRE Plus".
 - Check that no alert categories are all turned off in the app settings.
 
 ---

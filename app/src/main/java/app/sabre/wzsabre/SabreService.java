@@ -161,7 +161,7 @@ public class SabreService extends Service {
                 ? new Notification.Builder(this, UPDATE_CHANNEL_ID)
                 : new Notification.Builder(this);
         b.setSmallIcon(android.R.drawable.stat_sys_download_done)
-         .setContentTitle("CHP + Waze SABRE update available")
+         .setContentTitle("SABRE Plus update available")
          .setContentText("Version " + r.latestVersion + " available. Tap to download.")
          .setAutoCancel(true)
          .setContentIntent(pi);
@@ -435,7 +435,7 @@ public class SabreService extends Service {
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel ch = new NotificationChannel(
-                    CHANNEL_ID, "CHP + Waze SABRE", NotificationManager.IMPORTANCE_LOW);
+                    CHANNEL_ID, "SABRE Plus", NotificationManager.IMPORTANCE_LOW);
             ch.enableVibration(false);
             ch.setSound(null, null);
             NotificationManager nm = getSystemService(NotificationManager.class);
@@ -449,8 +449,8 @@ public class SabreService extends Service {
                 : new Notification.Builder(this);
         b.setOngoing(true)
          .setSmallIcon(android.R.drawable.ic_menu_compass)
-         .setContentTitle("CHP + Waze SABRE")
-         .setContentText("Providing CHP and Waze alerts to Highway Radar")
+         .setContentTitle("SABRE Plus")
+         .setContentText("Providing CHP, Waze, and Caltrans road alerts to Highway Radar")
          .setVisibility(Notification.VISIBILITY_PUBLIC);
         // setForegroundServiceBehavior is API 31 (S), not Q — guarding at Q threw
         // NoSuchMethodError on Android 10/11, killing the service on those devices.

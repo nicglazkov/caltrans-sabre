@@ -29,7 +29,7 @@ body:
   - type: input
     id: plugin-version
     attributes:
-      label: Plugin (CHP + Waze SABRE) version
+      label: Plugin (SABRE Plus) version
       description: Shown on the app's settings screen and the release you installed.
       placeholder: e.g. 1.5.1
     validations:
