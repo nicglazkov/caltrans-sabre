@@ -84,7 +84,7 @@ public class MainBroadcastReceiver extends BroadcastReceiver {
         String pkg = context.getPackageName();
         JSONObject response = new JSONObject();
         response.put("id",           pkg);
-        response.put("name",         "CHP + Waze SABRE");
+        response.put("name",         "SABRE Plus (CHP, Waze, Caltrans)");
         response.put("package_name", pkg);
         response.put("version",      BuildConfig.VERSION_NAME);
         JSONArray sources = new JSONArray();
