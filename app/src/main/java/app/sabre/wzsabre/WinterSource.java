@@ -107,11 +107,13 @@ public class WinterSource {
                 for (CacheEntry ce : cache.values()) total += ce.records.size();
                 SourceStatus.success(SabreResponseBuilder.SOURCE_CHAINS, total);
                 Log.d(TAG, "D" + district + " chain controls: " + parsed.size() + " records");
+                DebugLog.event("chains D" + district + ": " + parsed.size() + " records");
             } catch (Exception e) {
                 SourceStatus.failure(SabreResponseBuilder.SOURCE_CHAINS,
                         "D" + district + " " + e.getClass().getSimpleName());
                 Log.w(TAG, "D" + district + " chain-control refresh failed: "
                         + e.getClass().getSimpleName() + ": " + e.getMessage());
+                DebugLog.event("chains D" + district + ": failed " + e.getClass().getSimpleName());
             } finally {
                 flag.set(false);
             }
@@ -136,6 +138,7 @@ public class WinterSource {
             // from getResponseCode() above and surface as an error.
             if (code != HttpsURLConnection.HTTP_OK) {
                 Log.d(TAG, "D" + district + " chain-control feed HTTP " + code + "; treating as no data");
+                DebugLog.event("chains D" + district + ": HTTP " + code + " (no data)");
                 return new ArrayList<>();
             }
             try (InputStream in = conn.getInputStream()) {

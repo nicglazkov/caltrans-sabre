@@ -107,6 +107,7 @@ public class MainActivity extends Activity {
                 .setPositiveButton("Share", (d, w) -> {
                     String report = DiagnosticsReport.build(
                             this, include[0], include[1], include[2], include[3]);
+                    if (BuildConfig.DEBUG) android.util.Log.d("SABREDiag", report);
                     Intent send = new Intent(Intent.ACTION_SEND);
                     send.setType("text/plain");
                     send.putExtra(Intent.EXTRA_SUBJECT, "SABRE Plus diagnostics");

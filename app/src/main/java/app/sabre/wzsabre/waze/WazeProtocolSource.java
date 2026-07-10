@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import app.sabre.wzsabre.SabreAlert;
 import app.sabre.wzsabre.AlertMapper;
+import app.sabre.wzsabre.DebugLog;
 import app.sabre.wzsabre.SabreResponseBuilder;
 import app.sabre.wzsabre.SourceStatus;
 
@@ -152,6 +153,7 @@ public final class WazeProtocolSource {
                     cacheLon = lon;
                 } catch (Exception e) {
                     Log.w(TAG, "Waze refresh failed: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+                    DebugLog.event("waze: refresh failed " + e.getClass().getSimpleName());
                     SourceStatus.failure(SabreResponseBuilder.SOURCE_WAZE, e.getClass().getSimpleName());
                     // Don't retry a failure at poll cadence. A rejection already set a
                     // longer backoff in handleAccountRejected; only add the short generic
@@ -182,6 +184,7 @@ public final class WazeProtocolSource {
         SourceStatus.success(SabreResponseBuilder.SOURCE_WAZE, alertCache.size());
         Log.d(TAG, "Waze cache: " + alertCache.size() + " alerts near "
                 + String.format(Locale.US, "%.4f,%.4f", lat, lon));
+        DebugLog.event("waze: cache " + alertCache.size() + " alerts");   // count only, no location
     }
 
     /**
@@ -202,10 +205,12 @@ public final class WazeProtocolSource {
         if (!canRegisterToday() || consecutiveRejections > WazeConstants.MAX_CONSECUTIVE_REJECTIONS) {
             Log.w(TAG, "Account rejected; registration cap/limit reached (" + consecutiveRejections
                     + " consecutive) — backing off without re-registering: " + e.getMessage());
+            DebugLog.event("waze: rejected, cap reached (" + consecutiveRejections + " consecutive)");
             throw e;
         }
         Log.w(TAG, "Account rejected — re-registering (attempt " + consecutiveRejections + "): "
                 + e.getMessage());
+        DebugLog.event("waze: rejected, re-registering (attempt " + consecutiveRejections + ")");
         session = null;
         clearPersisted();
         recordRegistration();
@@ -217,6 +222,7 @@ public final class WazeProtocolSource {
         long delay = Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * (1L << (step - 1)));
         backoffUntilMs = SystemClock.elapsedRealtime() + delay;
         Log.d(TAG, "Waze refresh backing off " + (delay / 1000) + "s");
+        DebugLog.event("waze: backing off " + (delay / 1000) + "s");
     }
 
     private boolean canRegisterToday() {

@@ -2,6 +2,11 @@
 
 All notable changes to this project. This project adheres to [semantic-ish versioning](https://semver.org/); dates are release dates.
 
+## [1.9.1] - 2026-07-10
+
+### Changed
+- The Share diagnostics report is now much more detailed. It adds device ABIs, all of your settings and category toggles, the Highway Radar version and how often it is requesting data, the exact alert types being sent (category names only), per-source health, and a longer activity timeline including source refreshes, Waze session events, and service lifecycle. It still contains no location, street names, alert details, or personal data.
+
 ## [1.9] - 2026-07-10
 
 ### Added
@@ -151,6 +156,7 @@ Restored the plugin on Android 15/16 (foreground-service start fixes) and rewrot
 
 Initial release: CHP live incidents + Waze crowdsourced alerts for Highway Radar.
 
+[1.9.1]: https://github.com/nicglazkov/highway-radar-sabre-plus/releases/tag/v1.9.1
 [1.9]: https://github.com/nicglazkov/highway-radar-sabre-plus/releases/tag/v1.9
 [1.8.5]: https://github.com/nicglazkov/highway-radar-sabre-plus/releases/tag/v1.8.5
 [1.8.4]: https://github.com/nicglazkov/highway-radar-sabre-plus/releases/tag/v1.8.4

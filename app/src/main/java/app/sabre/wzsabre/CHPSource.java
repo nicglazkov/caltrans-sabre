@@ -106,6 +106,7 @@ public class CHPSource {
                         cache = parsed;
                         cacheTimeMs = System.currentTimeMillis();
                         Log.d(TAG, "CHP refreshed: " + parsed.size() + " statewide incidents");
+                        DebugLog.event("chp: refreshed " + parsed.size() + " statewide");
                     } else {
                         cacheTimeMs = System.currentTimeMillis();   // fresh enough, unchanged
                     }
@@ -116,6 +117,7 @@ public class CHPSource {
                     // blank CHP for the whole cycle.
                     Log.w(TAG, "CHP refresh failed (serving cache): "
                             + e.getClass().getSimpleName() + ": " + e.getMessage());
+                    DebugLog.event("chp: refresh failed " + e.getClass().getSimpleName());
                     SourceStatus.failure(SabreResponseBuilder.SOURCE_CHP,
                             e.getClass().getSimpleName());
                 } finally {

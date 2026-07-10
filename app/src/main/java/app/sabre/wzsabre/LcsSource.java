@@ -147,12 +147,14 @@ public class LcsSource {
                 List<Closure> parsed = fetchDistrict(district);
                 cache.put(district, new CacheEntry(parsed, System.currentTimeMillis()));
                 Log.d(TAG, "D" + district + " refreshed: " + parsed.size() + " closure records");
+                DebugLog.event("lcs D" + district + ": " + parsed.size() + " closures");
                 int total = 0;
                 for (CacheEntry ce : cache.values()) total += ce.closures.size();
                 SourceStatus.success(SabreResponseBuilder.SOURCE_LCS, total);
             } catch (Exception e) {
                 Log.w(TAG, "D" + district + " refresh failed: "
                         + e.getClass().getSimpleName() + ": " + e.getMessage());
+                DebugLog.event("lcs D" + district + ": failed " + e.getClass().getSimpleName());
                 SourceStatus.failure(SabreResponseBuilder.SOURCE_LCS,
                         "D" + district + " " + e.getClass().getSimpleName());
             } finally {

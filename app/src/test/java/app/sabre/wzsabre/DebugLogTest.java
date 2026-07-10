@@ -59,10 +59,10 @@ public class DebugLogTest {
 
     @Test
     public void event_ringBufferCapsAndKeepsMostRecent() {
-        for (int i = 0; i < 100; i++) DebugLog.event("evt" + i);
+        for (int i = 0; i < 300; i++) DebugLog.event("evt" + i);
         List<String> ev = DebugLog.recentEvents();
-        assertTrue("capped at 60", ev.size() <= 60);
-        assertTrue("keeps most recent", ev.get(ev.size() - 1).contains("evt99"));
+        assertTrue("capped at 150", ev.size() <= 150);
+        assertTrue("keeps most recent", ev.get(ev.size() - 1).contains("evt299"));
         assertFalse("drops oldest", ev.get(0).contains("evt0 "));
     }
 

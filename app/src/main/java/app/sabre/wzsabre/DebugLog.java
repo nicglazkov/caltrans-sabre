@@ -23,7 +23,7 @@ import java.util.Map;
 public final class DebugLog {
     private DebugLog() {}
 
-    private static final int MAX_EVENTS = 60;
+    private static final int MAX_EVENTS = 150;
 
     private static final class Ev {
         final long ts; final String msg;
@@ -32,6 +32,8 @@ public final class DebugLog {
 
     private static final Deque<Ev> EVENTS = new ArrayDeque<>();
     private static volatile long lastFetchReceivedMs = 0;
+    private static volatile long lastFetchIntervalMs = 0;
+    private static volatile int  fetchCount = 0;
     private static volatile String lastFetchSummary = null;
     private static final Map<String, Integer> lastFetchTypes = new LinkedHashMap<>();
 
@@ -43,7 +45,10 @@ public final class DebugLog {
 
     /** Note that Highway Radar asked us for data (drives "HR last requested Ns ago"). */
     public static synchronized void fetchReceived() {
-        lastFetchReceivedMs = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        if (lastFetchReceivedMs > 0) lastFetchIntervalMs = now - lastFetchReceivedMs;
+        lastFetchReceivedMs = now;
+        fetchCount++;
     }
 
     /**
@@ -80,6 +85,9 @@ public final class DebugLog {
         return (lastFetchReceivedMs == 0) ? -1 : System.currentTimeMillis() - lastFetchReceivedMs;
     }
 
+    public static synchronized int  sessionFetchCount()   { return fetchCount; }
+    public static synchronized long lastFetchIntervalMs() { return lastFetchIntervalMs; }
+
     public static synchronized String lastFetchSummary() { return lastFetchSummary; }
 
     public static synchronized Map<String, Integer> lastFetchTypes() {
@@ -101,6 +109,8 @@ public final class DebugLog {
     static synchronized void clear() {
         EVENTS.clear();
         lastFetchReceivedMs = 0;
+        lastFetchIntervalMs = 0;
+        fetchCount = 0;
         lastFetchSummary = null;
         lastFetchTypes.clear();
     }
