@@ -142,25 +142,56 @@ If you already have wzsabre installed:
 
 ---
 
-## How it works (brief)
+## How it works
 
-```
-Highway Radar  ──broadcast──▶  MainBroadcastReceiver
-                                      │
-                        startForegroundService()
-                          (+ exact-alarm fallback)
-                                      │
-                               SabreService (foreground)
-                              ┌───────┼─────────┐
-                          CHP feed   Waze    Caltrans LCS
-                          (XML)     (mobile  (per-district
-                                    "RT"      closure XML,
-                                    protocol, cached)
-                                    protobuf)
-                              └───────┼─────────┘
-                               sendBroadcast(response)
-                                      │
-                               Highway Radar  ◀──────
+The graph below is interactive: on GitHub, click any box to jump straight to the source file that implements it, and click the diagram to zoom.
+
+```mermaid
+flowchart TD
+    HR(["📱 Highway Radar"])
+
+    HR -- "1. HANDSHAKE broadcast<br/>plugin discovery" --> RCV
+    HR -- "2. REQUEST / FETCH_REQUEST<br/>lat, lon, radius" --> RCV
+
+    RCV["MainBroadcastReceiver<br/>listens for wzsabre and<br/>legacy action names"]
+    RCV -. "handshake reply:<br/>id · 5 sources · action names" .-> HR
+    RCV -- "startForegroundService<br/>+ exact-alarm fallback" --> FSS
+    FSS["ForegroundServiceStarter"] --> SVC
+    SVC["SabreService<br/>foreground service,<br/>reloads settings each fetch"]
+
+    subgraph SOURCES["Alert sources: fetched in parallel"]
+        direction LR
+        CHP["🚔 CHP Live Feed<br/>sa.xml statewide<br/>radius + age + category filter"]
+        WAZE["🚗 Waze<br/>mobile RT protobuf<br/>register, login, query<br/>delta-merged cache"]
+        LCS["🚧 Caltrans LCS<br/>per-district closure XML<br/>code 1097 only · cached 5 min"]
+        FIRE["🔥 Wildfires<br/>WFIGS active CA fires<br/>size filter · cached 5 min"]
+        CHAINS["❄️ Chain controls<br/>per-district CC XML<br/>R-1/R-2/R-3 · cached 5 min"]
+    end
+
+    SVC --> CHP & WAZE & LCS & FIRE & CHAINS
+    CHP & WAZE & LCS & FIRE & CHAINS --> MERGE
+
+    MERGE["Filter to radius,<br/>cross-source de-dupe"]
+    MERGE --> BUILD["SabreResponseBuilder<br/>exactly 9 SABRE fields,<br/>type starts POLICE / HAZARD / ACCIDENT"]
+    BUILD -- "3. sendBroadcast<br/>JSON alert payload" --> HR
+    HR --> MAP(["🗺️ Alerts drawn on HR's<br/>crowdsourced-alert layer"])
+
+    click RCV "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/MainBroadcastReceiver.java" "MainBroadcastReceiver.java"
+    click FSS "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/ForegroundServiceStarter.java" "ForegroundServiceStarter.java"
+    click SVC "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/SabreService.java" "SabreService.java"
+    click CHP "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/CHPSource.java" "CHPSource.java"
+    click WAZE "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/waze/WazeProtocolSource.java" "WazeProtocolSource.java"
+    click LCS "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/LcsSource.java" "LcsSource.java"
+    click FIRE "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/WildfireSource.java" "WildfireSource.java"
+    click CHAINS "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/WinterSource.java" "WinterSource.java"
+    click BUILD "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/SabreResponseBuilder.java" "SabreResponseBuilder.java"
+
+    classDef hr fill:#12a150,stroke:#0b5e2f,color:#ffffff;
+    classDef plugin fill:#e3f2fd,stroke:#1565c0,color:#0d47a1;
+    classDef source fill:#fff3e0,stroke:#e65100,color:#bf360c;
+    class HR,MAP hr;
+    class RCV,FSS,SVC,MERGE,BUILD plugin;
+    class CHP,WAZE,LCS,FIRE,CHAINS source;
 ```
 
 - **CHP**: fetches `https://media.chp.ca.gov/sa_xml/sa.xml`, filters by radius and incident age, applies your category settings.
