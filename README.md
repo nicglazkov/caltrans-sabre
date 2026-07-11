@@ -144,7 +144,19 @@ If you already have wzsabre installed:
 
 ## How it works
 
-The graph below is interactive: on GitHub, click any box to jump straight to the source file that implements it, and click the diagram to zoom.
+The graph shows the full path from a Highway Radar request to alerts on its map. It renders as an image everywhere, including the GitHub mobile app. On the GitHub website you can expand the interactive version below to zoom and click any box through to its source.
+
+<p align="center">
+  <img src="docs/how-it-works.png" width="440" alt="Highway Radar broadcasts a request to MainBroadcastReceiver, which starts the foreground SabreService. Five sources (CHP, Waze, Caltrans LCS, wildfires, chain controls) are fetched in parallel, de-duplicated, built into a 9-field SABRE response by SabreResponseBuilder, and broadcast back to Highway Radar's crowdsourced-alert layer.">
+</p>
+
+**Jump to the source for each step**
+
+- Plugin pipeline: [MainBroadcastReceiver](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/MainBroadcastReceiver.java) · [ForegroundServiceStarter](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/ForegroundServiceStarter.java) · [SabreService](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/SabreService.java) · [SabreResponseBuilder](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/SabreResponseBuilder.java)
+- Sources: [CHP](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/CHPSource.java) · [Waze](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/waze/WazeProtocolSource.java) · [Caltrans LCS](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/LcsSource.java) · [Wildfires](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/WildfireSource.java) · [Chain controls](https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/app/src/main/java/app/sabre/wzsabre/WinterSource.java)
+
+<details>
+<summary><b>Interactive version</b> (zoom and clickable nodes, on the GitHub website)</summary>
 
 ```mermaid
 flowchart TD
@@ -193,6 +205,8 @@ flowchart TD
     class RCV,FSS,SVC,MERGE,BUILD plugin;
     class CHP,WAZE,LCS,FIRE,CHAINS source;
 ```
+
+</details>
 
 - **CHP**: fetches `https://media.chp.ca.gov/sa_xml/sa.xml`, filters by radius and incident age, applies your category settings.
 - **Waze**: emulates the Waze mobile app's binary "RT" protocol. It registers an anonymous Waze session, logs in, and queries crowd-sourced alerts over Waze's protobuf API (the older live-map/georss API is now blocked). The RT feed is session-stateful (each alert is sent once, then removed when it clears), so query results are merged into a persistent alert cache rather than replacing it, this keeps alerts from disappearing as you drive. A series of progressively smaller map viewports is queried so the server doesn't thin out minor alerts near you, the session is pre-warmed at start to cut first-load latency, and Waze alert subtypes (e.g. *car stopped on shoulder*, *heavy traffic*) are passed through to Highway Radar verbatim rather than flattened.
