@@ -2,6 +2,11 @@
 
 All notable changes to this project. This project adheres to [semantic-ish versioning](https://semver.org/); dates are release dates.
 
+## [1.9.4] - 2026-07-12
+
+### Added
+- A **Privacy** button in the settings screen. It shows a plain-language summary of what the app does and does not do with data (no servers, no accounts, no analytics, everything on-device; only the Waze feature sends your approximate location, over an anonymous session, to fetch nearby alerts) and links to the full privacy policy. A new PRIVACY.md documents the same in detail.
+
 ## [1.9.3] - 2026-07-10
 
 ### Changed

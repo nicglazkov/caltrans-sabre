@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
         buildDiagnostics();
         buildReportButton();
         buildShareDiagnostics();
+        buildPrivacyButton();
         checkForUpdate();
     }
 
@@ -88,6 +89,41 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {}
             }
         });
+    }
+
+    /**
+     * "Privacy" shows a plain-language summary of what the app does and does not do
+     * with data, entirely on-device, plus a link to the full PRIVACY.md policy.
+     * ACTION_VIEW needs no permission. Kept in sync with PRIVACY.md.
+     */
+    private void buildPrivacyButton() {
+        final String policyUrl =
+                "https://github.com/nicglazkov/highway-radar-sabre-plus/blob/main/PRIVACY.md";
+        String summary =
+            "SABRE Plus has no servers and no accounts, and collects no personal data. "
+          + "Everything runs on your device.\n\n"
+          + "Stored on your device: your settings, an anonymous Waze session, and a short "
+          + "diagnostics log that is only ever shared when you tap Share diagnostics.\n\n"
+          + "Leaves your device: it fetches road data from public sources (CHP, Caltrans, "
+          + "wildfire feeds) and from Waze. The Waze feature sends your approximate location "
+          + "(a map area around you) to Waze over an anonymous session so it can return nearby "
+          + "alerts. The CHP, Caltrans, and wildfire requests do not send your location. Each "
+          + "service you contact can see your device's IP address, as with any app.\n\n"
+          + "Never: no analytics, no tracking, no advertising, no user IDs, no location history, "
+          + "and nothing is ever sold.\n\n"
+          + "Diagnostics you choose to share contain no location, street names, alert IDs, or "
+          + "personal data.";
+        findViewById(R.id.privacyButton).setOnClickListener(v ->
+            new AlertDialog.Builder(this)
+                .setTitle("Privacy")
+                .setMessage(summary)
+                .setPositiveButton("View full policy", (d, w) -> {
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(policyUrl)));
+                    } catch (Exception ignored) {}
+                })
+                .setNegativeButton("Close", null)
+                .show());
     }
 
     /**

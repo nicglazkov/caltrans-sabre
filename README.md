@@ -229,6 +229,12 @@ Pull requests welcome. Run the test suite before submitting:
 
 ---
 
+## Privacy
+
+SABRE Plus has no servers, no accounts, and no analytics, and collects no personal data. Everything runs on your device. It fetches road data from public feeds (CHP, Caltrans, wildfires) and from Waze; only the Waze feature sends your approximate location, over an anonymous session, so it can return nearby alerts. See the full [Privacy Policy](PRIVACY.md).
+
+---
+
 ## Disclaimer
 
 This is an independent, unofficial project. It is **not affiliated with, endorsed by, or supported by** Waze, Google, the California Highway Patrol, Caltrans, or Highway Radar.
